@@ -1,5 +1,5 @@
-(defproject com.dnrtech/raft "0.0.0"
-  :description "FIXME: write description"
+(defproject com.dnrtech/raft "0.0.1"
+  :description "A basic implementation of the RAFT consensus protocol in Clojure."
   :url "https://github.com/defncoder/raft"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
