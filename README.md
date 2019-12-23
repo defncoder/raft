@@ -3,19 +3,19 @@
 [![codecov](https://codecov.io/gh/defncoder/raft/branch/master/graph/badge.svg)](https://codecov.io/gh/defncoder/raft)
 [![Clojars Project](https://img.shields.io/clojars/v/com.dnrtech/raft.svg)](https://clojars.org/com.dnrtech/raft)
 
-A Clojure library designed to ... well, that part is up to you.
+A basic implementation of the RAFT consensus protocol in Clojure.
 
 ```clj
-[com.dnrtech/raft "0.0.0"]
+[com.dnrtech/raft "0.0.1"]
 ```
 
 ## Usage
 
-FIXME
+TODO
 
 ## License
 
-Copyright © 2018 FIXME
+Copyright © 2018 DnRTech
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
