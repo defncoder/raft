@@ -6,5 +6,5 @@
 (defn get-resource-full-path
   "docstring"
   [resource]
-  (println (str "*************************************" (.getPath (io/resource resource))))
+  (l/debug (.getPath (io/resource resource)))
   (.getPath (io/resource resource)))
