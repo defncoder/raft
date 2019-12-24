@@ -19,13 +19,17 @@
                  ;; JSON
                  [cheshire/cheshire "5.8.0"]
                  ;; general component facility
-                 [com.stuartsierra/component "0.4.0"]
-                 ]
+                 [com.stuartsierra/component "0.4.0"]]
   :plugins [[lein-cloverage "1.0.13"]
             [lein-shell "0.5.0"]
             [lein-ancient "0.6.15"]
             [lein-changelog "0.3.2"]]
   :main raft.core
+  :aot [raft.core raft.resource raft.config]
+  :manifest {"Main-Class" "raft.core"}
+  ;; :resource-paths ["resources"]
+  :resource-paths ["src/resources"]
+  :target-path "target/%s"
   :profiles {:dev {:dependencies [[org.clojure/clojure "1.10.0"]]}}
   :deploy-repositories [["releases" :clojars]]
   :aliases {"update-readme-version" ["shell" "sed" "-i" "s/\\\\[com\\.dnrtech\\\\/raft \"[0-9.]*\"\\\\]/[com\\.dnrtech\\\\/raft \"${:version}\"]/" "README.md"]}

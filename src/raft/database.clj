@@ -1,13 +1,16 @@
 (ns raft.database
   (:require
-   [[clojure.tools.logging :as l]])
+   [clojure.tools.logging :as l]
+   [com.stuartsierra.component :as component])
   (:import
    [com.zaxxer.hikari HikariConfig HikariDataSource]))
 
 (defn hikari-connection-pool
   [spec]
+  (println spec)
+  (l/info "DB Spec is: " spec)
   (let [hds (doto (HikariDataSource.)
-              (.setProperty "dataSourceClassName" (:classname spec))
+              ;; (.setProperty "dataSourceClassName" (:classname spec))
               (.setJdbcUrl (str "jdbc:" (:subprotocol spec) ":" (:subname spec)))
               ;; (.setUsername (:user spec))
               ;; (.setPassword (:password spec))

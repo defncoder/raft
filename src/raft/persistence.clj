@@ -18,5 +18,8 @@
   []
   (l/info "=================================About to start DB migration=================================")
   ;; (l/info (str "Migrations are: \n" (:migrations (migration/migration-config (:database system) "resources/migrations"))))
-  (repl/migrate (migration/migration-config @(:connection (:database system)) "resources/migrations"))
+  (repl/migrate
+   (migration/migration-config
+    @(:connection (:database system))
+    "resources/migrations"))
   (l/info "==================================DB migration done.================================"))

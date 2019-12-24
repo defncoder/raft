@@ -17,14 +17,13 @@
 (defn get-current-env-config
   "Read and return the config."
   []
-  (l/info "Environment is: " (System/getProperties))
-  (l/info "Env is: " (-> (System/getProperties)
-                         (get "app.env")))
+  ;; (l/info "Environment is: " (System/getProperties))
+  ;; (l/info "Env is: " (-> (System/getProperties) (get "app.env")))
   
-  (let [default-config (read-config "/resources/app.default.edn")]
+  (let [default-config (read-config "app.default.edn")]
     (if-let [envname (-> (System/getProperties)
                          (get "app.env"))]
-      (merge default-config (read-config (str "/resources/app." envname ".edn")))
+      (merge default-config (read-config (str "/src/resources/app." envname ".edn")))
       default-config)))
 
 (defonce config (get-current-env-config))
