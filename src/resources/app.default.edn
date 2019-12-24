@@ -1,0 +1,26 @@
+{
+ :version "0.0.1-SNAPSHOT"
+ ;; :keystore "/keystore.p12"
+ ;; :keystore-password "clojure-rocks-emacs"
+ ;; :trust-store "/truststore.p12"
+ ;; :trust-store-password "clojure-rocks-emacs"
+ :server-options {
+                  :ssl? false
+                  :http? true
+                  ;; :ssl-port 443
+                  :port 7000
+                  ;; :key-password "clojure-rocks-emacs"
+                  }
+ :db-spec {
+           :classname "org.sqlite.SQLiteDataSource"
+           :subprotocol "sqlite"
+           :subname "/home/easwar/data/raft/raft1.db"
+           :user "profileapp"
+           :password "clojure-and-emacs-rock"
+           }
+
+ :cache-spec {
+              :host "redis-svc"
+              :port 6379
+              } 
+ }

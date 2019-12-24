@@ -1,0 +1,3 @@
+DROP TABLE log;
+
+DROP TABLE data;

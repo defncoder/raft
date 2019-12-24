@@ -1,11 +1,9 @@
-(ns raft.core)
-
-
-(defn foo "I don't do a whole lot."
-  [x]
-  (println "Hello, World!" x))
+(ns raft.core
+  (:require
+   [[clojure.tools.logging :as l]
+    [raft.persistence :as persistence]]))
 
 (defn -main
   "docstring"
   [& args]
-  (foo "raft"))
+  (persistence/migrate-db))
