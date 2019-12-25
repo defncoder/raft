@@ -4,7 +4,6 @@
   (:gen-class))
 
 (defn get-resource-full-path
-  "docstring"
+  "Get a resource instance from the local dir in dev mode or from the JAR bundle."
   [resource]
-  (l/debug (.getPath (io/resource resource)))
-  (.getPath (io/resource resource)))
+  (io/resource resource))

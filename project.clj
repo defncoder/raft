@@ -3,6 +3,9 @@
   :url "https://github.com/defncoder/raft"
   :license {:name "Eclipse Public License"
             :url  "http://www.eclipse.org/legal/epl-v10.html"}
+  :managed-dependencies [
+                         [org.clojure/clojure "1.10.1"]
+                         ]
   :dependencies [[org.xerial/sqlite-jdbc "3.28.0"]
                  [org.clojure/tools.logging "0.4.1"]
                  [org.clojure/java.jdbc "0.7.9"]
@@ -19,18 +22,44 @@
                  ;; JSON
                  [cheshire/cheshire "5.8.0"]
                  ;; general component facility
-                 [com.stuartsierra/component "0.4.0"]]
-  :plugins [[lein-cloverage "1.0.13"]
-            [lein-shell "0.5.0"]
-            [lein-ancient "0.6.15"]
-            [lein-changelog "0.3.2"]]
+                 [com.stuartsierra/component "0.4.0"]
+                 ;; https://mvnrepository.com/artifact/com.google.protobuf/protobuf-java
+                 [com.google.protobuf/protobuf-java "3.11.1"]
+
+                 [javax.annotation/javax.annotation-api "1.2"]
+                 [io.netty/netty-codec-http2 "4.1.25.Final"]
+                 [io.grpc/grpc-core "1.26.0" :exclusions [io.grpc/grpc-api]]
+                 [io.grpc/grpc-netty "1.26.0"
+                  :exclusions [io.grpc/grpc-core
+                               io.netty/netty-codec-http2]]
+                 [io.grpc/grpc-protobuf "1.26.0"]
+                 [io.grpc/grpc-stub "1.26.0"]
+                 
+                 ]
+  :plugins [
+            ;; [lein-cloverage "1.0.13"]
+            ;; [lein-shell "0.5.0"]
+            ;; [lein-ancient "0.6.15"]
+            ;; [lein-changelog "0.3.2"]
+            [lein-protoc "0.5.0"]
+            ]
+
+  :protoc-version "3.6.0"
+  :proto-source-paths ["resources"]
+  :protoc-grpc {:version "1.26.0"}
+
+  :java-source-paths ["target/generated"]
+  
+  :proto-target-path "target/generated"
+  
   :main raft.core
-  :aot [raft.core raft.resource raft.config]
+  ;; :aot [raft.core raft.resource raft.config raft.state]
   :manifest {"Main-Class" "raft.core"}
-  ;; :resource-paths ["resources"]
-  :resource-paths ["src/resources"]
+  :resource-paths ["resources"]
   :target-path "target/%s"
-  :profiles {:dev {:dependencies [[org.clojure/clojure "1.10.0"]]}}
+  :profiles {:dev {:aot [raft.grpcservice]
+                   :dependencies []}
+             :uberjar {:aot :all}}
   :deploy-repositories [["releases" :clojars]]
   :aliases {"update-readme-version" ["shell" "sed" "-i" "s/\\\\[com\\.dnrtech\\\\/raft \"[0-9.]*\"\\\\]/[com\\.dnrtech\\\\/raft \"${:version}\"]/" "README.md"]}
   :release-tasks [["shell" "git" "diff" "--exit-code"]

@@ -10,7 +10,7 @@
             <AppenderRef ref="LogToConsole"/>
         </Logger>
 	
-        <Root level="debug">
+        <Root level="info">
             <AppenderRef ref="LogToConsole"/>
         </Root>
     </Loggers>
