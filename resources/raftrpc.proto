@@ -51,7 +51,7 @@ message AppendRequest {
   int64  prevLogIndex = 3;
   int64  prevLogTerm = 4;
   int64  leaderCommitIndex = 5;
-  repeated LogEntry entries = 6;
+  repeated LogEntry logEntry = 6;
 }
 
 // An AppendResult from followers to leader.

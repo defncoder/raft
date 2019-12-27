@@ -48,9 +48,8 @@
   :proto-source-paths ["resources"]
   :protoc-grpc {:version "1.26.0"}
 
-  :java-source-paths ["target/generated"]
-  
-  :proto-target-path "target/generated"
+  :proto-target-path "src/generated"
+  :java-source-paths ["src/generated"]
   
   :main raft.core
   ;; :aot [raft.core raft.resource raft.config raft.state]
