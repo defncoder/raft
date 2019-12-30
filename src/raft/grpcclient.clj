@@ -1,6 +1,7 @@
 (ns raft.grpcclient
   (:require [clojure.tools.logging :as l]
-            [raft.persistence :as persistence])
+            [raft.persistence :as persistence]
+            [raft.state :as state])
   (:import [raft.rpc
             RaftContainer
             RaftRPCGrpc
@@ -9,11 +10,13 @@
             LogEntry
             ]))
 
-;;; client
-(def client (raft.rpc.RaftRPCGrpc/newBlockingStub
-             (-> (io.grpc.ManagedChannelBuilder/forAddress "localhost" (int 50051))
-                 (.usePlaintext)
-                 .build)))
+(defn client-for
+  "Construct a gRPC client for host and port."
+  [hostname port]
+  (raft.rpc.RaftRPCGrpc/newBlockingStub
+   (-> (io.grpc.ManagedChannelBuilder/forAddress hostname port)
+       (.usePlaintext)
+       .build)))
 
 (defn loop-index
   "Loop with index on a sequable collection."
@@ -65,17 +68,17 @@
 
 (defn make-append-request
   "Make an AppendRequest GRPC call."
-  [term]
+  [host port term]
   (let [request (construct-append-request {:leader-term term
                                            :log-entries (construct-test-log-entries 2)})
-        response (.appendEntries client request)
-        current-term (persistence/get-current-term)
+        response (.appendEntries (client-for host port) request)
+        current-term (state/get-current-term)
         new-term (.getTerm response)]
     (if (< current-term new-term)
-      (persistence/cond-update-term-voted-for new-term))
+      (persistence/save-current-term-and-voted-for new-term nil))
     (if (.getSuccess response)
       (l/info "Successful response with term result:" (.getTerm response) (.getSuccess response))
       (l/info "Not successful response." (.getTerm response) (.getSuccess response)))))
 
-(defn append-request [term]
-  (make-append-request term))
+(defn append-request [host port term]
+  (make-append-request host port term))

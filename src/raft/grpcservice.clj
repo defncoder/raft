@@ -50,7 +50,7 @@
      term matches request.prevLogTerm (§5.3).
   See http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf for details."
   [req]
-  (or (< (.getTerm req) (persistence/get-current-term))
+  (or (< (.getTerm req) (state/get-current-term))
       (not (persistence/has-log-at-index-with-term? (.getPrevLogIndex req) (.getPrevLogTerm req)))))
 
 (defn new-commit-index-for-request
@@ -71,12 +71,12 @@
 (defn heartbeat-response
   "Make a heartbeat response."
   []
-  (make-response (persistence/get-current-term) true))
+  (make-response (state/get-current-term) true))
 
 (defn unsuccessful-response
   "Make a heartbeat response."
   []
-  (make-response (persistence/get-current-term) false))
+  (make-response (state/get-current-term) false))
 
 (defn delete-conflicting-entries-for-request
   "Delete all existing but conflicting log entries for this request."
@@ -86,20 +86,21 @@
 (defn append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
   [request]
-  (persistence/cond-update-term-voted-for (.getTerm request))
+  (persistence/save-current-term-and-voted-for (.getTerm request) nil)
   (delete-conflicting-entries-for-request request)
   (persistence/append-new-log-entries (.getLogEntryList request))
   (reset! state/commit-index (new-commit-index-for-request request @state/commit-index))
-  (make-response (persistence/get-current-term) true))
+  (make-response (state/get-current-term) true))
 
 (defn handle-append-request
   "Handle an AppendEntries request."
   [request]
+  (state/inc-append-entries-call-sequence)
   (cond
     ;; Handle heartbeat requests.
     (is-heartbeat-request? request) (do
                                       ;; Update current term if necessary.
-                                      (persistence/cond-update-term-voted-for (.getTerm request))
+                                      (persistence/save-current-term-and-voted-for (.getTerm request) nil)
                                       ;; Respond to heartbeat.
                                       (heartbeat-response))
     ;; Request is not acceptable. See is-unacceptable-append-request? for details.
@@ -115,9 +116,7 @@
       (.setVoteGranted vote-granted?)
       (.build)))
 
-
 ;; Raft determines which of two logs is more up-to-dateby comparing the index and term of the last entries in thelogs. If the logs have last entries with different terms, thenthe log with the later term is more up-to-date. If the logsend with the same term, then whichever log is longer ismore up-to-date.
-
 (defn is-candidate-up-to-date?
   "Are a candidate's log entries up to date?"
   [candidate-last-log-index candidate-last-log-term]
@@ -130,20 +129,28 @@
 (defn can-vote-for-candidate?
   "Can this server vote for a candidate?"
   [candidate-term candidate-id candidate-last-log-index candidate-last-log-term]
-  (let [current-term (persistence/get-current-term)]
+  (let [current-term (state/get-current-term)]
     (if (< candidate-term current-term)
       false
-      (let [voted-for (persistence/get-candidate-voted-for)]
-        (or (nil? voted-for) (and (= candidate-id voted-for) (is-candidate-up-to-date? candidate-id)))))))
+      (let [voted-for (persistence/get-voted-for)]
+        (or (nil? voted-for) (and (= candidate-id voted-for) (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term)))))))
+
+(defn remember-vote-granted
+  "Bookkeeping mechanism once vote is granted to someone."
+  [term candidate-id]
+  (state/inc-voted-sequence)
+  (persistence/save-current-term-and-voted-for term candidate-id))
 
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
-  (let [current-term (persistence/get-current-term)
-        voted-for    (persistence/get-candidate-voted-for)]
-    (if (< (.getTerm request) current-term)
-      (make-vote-response current-term false)
-      (make-vote-response current-term (or (nil? voted-for) (= (.getCandidateId request) voted-for) ())))))
+  (let [current-term (state/get-current-term)
+        last-voted-for (persistence/get-voted-for)
+        grant-vote? (and (>= (.getTerm request) current-term)
+                         (or (nil? last-voted-for)
+                             (= (.getCandidateId request) last-voted-for)))
+        _ (and grant-vote? (remember-vote-granted (.getTerm request) (.getCandidateId request)))]
+    (make-vote-response current-term grant-vote?)))
 
 (defn -appendEntries [this request response]
   (doto response

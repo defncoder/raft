@@ -34,7 +34,8 @@
                                io.netty/netty-codec-http2]]
                  [io.grpc/grpc-protobuf "1.26.0"]
                  [io.grpc/grpc-stub "1.26.0"]
-                 
+
+                 [org.clojure/tools.cli "0.4.2"]                 
                  ]
   :plugins [
             ;; [lein-cloverage "1.0.13"]

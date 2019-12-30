@@ -19,18 +19,6 @@
   []
   @(:connection (:database system)))
 
-(defn cond-update-term-voted-for
-  "Conditionally update to new term if it is greater than existing term. If term is udpated, then voted_for is reset to NULL."
-  [new-term]
-  (sql/execute! (db-connection)
-                ["UPDATE terminfo set current_term=?, voted_for=NULL WHERE current_term < ?" new-term]))
-
-(defn add-log-entry
-  "Add a new log entry to the local DB."
-  [sequence value]
-  (sql/execute! (db-connection)
-                ["INSERT INTO raftlog (sequence, value) VALUES ((?), (?))" sequence value]))
-
 (defn get-current-term
   "Read the current term from persistent storage."
   []
@@ -39,12 +27,24 @@
       (first)
       (:current_term 0)))
 
-(defn get-candidate-voted-for
+(defn get-voted-for
   "Get the candidateId of the candidate this server voted for."
   []
   (-> (sql/query (db-connection) ["SELECT voted_for FROM terminfo LIMIT 1"])
       (first)
       (:voted_for nil)))
+
+(defn save-current-term-and-voted-for
+  "Conditionally update to new term if it is greater than existing term. If term is udpated, then voted_for is reset to NULL."
+  [new-term voted-for]
+  (sql/execute! (db-connection)
+                ["UPDATE terminfo set current_term=?, voted_for=?" new-term, voted-for]))
+
+(defn add-log-entry
+  "Add a new log entry to the local DB."
+  [sequence value]
+  (sql/execute! (db-connection)
+                ["INSERT INTO raftlog (sequence, value) VALUES ((?), (?))" sequence, value]))
 
 (defn get-last-log-entry
   "Get the last log entry from persistent storage."
