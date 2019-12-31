@@ -30,6 +30,11 @@
 ;; ALL updates to these persistent values will only be done within a coordinated transaction of these related refs.
 (def current-term-and-vote (atom {:current-term 0 :voted-for nil}))
 
+;; Info about this/current server.
+(def this-server (atom {}))
+;; Vector of other servers.
+(def other-servers (atom []))
+
 (defn- initial-index-map
   "Make a next-index map for known servers."
   [servers leader-last-log-index]
@@ -38,14 +43,17 @@
 (defn- server-names
   "Get an array of server names from server deployment info."
   [servers]
-  (map #(util/make-qualified-server-name %1) servers))
+  (map #(util/qualified-server-name %1) servers))
 
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
-  [servers leader-last-log-index]
+  [servers current-server leader-last-log-index]
   (let [names (server-names servers)]
     (swap! next-index (fn [_] (initial-index-map names leader-last-log-index)))
     (swap! match-index (fn [_] (initial-index-map names 0)))
+    (swap! this-server (fn [_] current-server))
+    (swap! other-servers (fn [_] (filterv #(not= current-server %1) servers)))
+    (l/info "Other servers: " @other-servers)
     (l/info "Next index: " @next-index)
     (l/info "Match index: " @match-index)))
 
@@ -73,6 +81,16 @@
   "Increment the voted-sequence number."
   []
   (swap! voted-sequence inc))
+
+(defn get-other-servers
+  "Get a list of other servers info."
+  []
+  @other-servers)
+
+(defn get-this-server
+  "Get info about this server."
+  []
+  @this-server)
 
 (defn get-current-term
   "Get the current term value."
@@ -111,6 +129,9 @@
 
 (defn vote-for-self
   "Synchronously update the current-term and voted-for values and their corresponding persistent state."
-  [server-name]
+  []
   (swap! current-term-and-vote (fn [old-info]
-                                 (swap-term-and-voted-for-info old-info (inc (:current-term old-info)) server-name))))
+                                 (swap-term-and-voted-for-info
+                                  old-info
+                                  (inc (:current-term old-info))
+                                  (util/qualified-server-name @this-server)))))

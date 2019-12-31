@@ -27,7 +27,8 @@
 
 (defn candidate-operations
   "Work to do as a candidate."
-  [server-name]
+  []
+  
   )
 
 (defn service-thread
@@ -43,7 +44,7 @@
 (defn start-raft-service [server-info]
   (l/info "About to start gRPC service")
   (let [port (:port server-info)
-        server-name (util/make-qualified-server-name server-info)
+        server-name (util/qualified-server-name server-info)
         raft-service (new raft.grpcservice.RaftRPCImpl)
         server (-> (ServerBuilder/forPort port)
                    (.addService raft-service)

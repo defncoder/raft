@@ -54,10 +54,10 @@
         deployment (config/read-deployment-details deployment-file)
         servers (:servers deployment)
         this-server (nth servers (:index options))]
-    (persistence/init-db-connection (util/make-qualified-server-name this-server))
+    (persistence/init-db-connection (util/qualified-server-name this-server))
     (persistence/migrate-db)
     (state/init-term-and-last-voted-for)
-    (state/init-with-servers servers 0)
+    (state/init-with-servers servers this-server 0)
     (l/info "Now listening for gRPC requests on port" (:port this-server))
     (if-let [server (service/start-raft-service this-server)]
       (do
