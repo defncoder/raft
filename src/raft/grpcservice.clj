@@ -5,7 +5,8 @@
    [raft.persistence :as persistence]
    [raft.state :as state]
    [raft.election :as election]
-   [raft.util :as util]   
+   [raft.util :as util]
+   [raft.grpcclient :as client]
    )
   (:import
    [io.grpc.stub StreamObserver]
@@ -27,9 +28,9 @@
 
 (defn candidate-operations
   "Work to do as a candidate."
-  []
-  
-  )
+  [timeout]
+  (state/vote-for-self)
+  (client/make-vote-requests (state/get-other-servers) timeout))
 
 (defn service-thread
   "Main loop for service."
@@ -39,6 +40,7 @@
       (let [election-timeout (election/choose-election-timeout)]
         (Thread/sleep election-timeout)
         (l/info "Woke up from election timeout of " election-timeout "milliseconds.")
+        (candidate-operations election-timeout)
         (recur)))))
 
 (defn start-raft-service [server-info]

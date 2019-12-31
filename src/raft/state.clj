@@ -92,6 +92,11 @@
   []
   @this-server)
 
+(defn get-this-server-name
+  "Get the qualified name of the current server."
+  []
+  (util/qualified-server-name @this-server))
+
 (defn get-current-term
   "Get the current term value."
   []
@@ -128,7 +133,8 @@
                                  (swap-term-and-voted-for-info old-info new-term new-voted-for))))
 
 (defn vote-for-self
-  "Synchronously update the current-term and voted-for values and their corresponding persistent state."
+  "Synchronously increment the current-term and set the voted-for value
+  to the current server and persist this info."
   []
   (swap! current-term-and-vote (fn [old-info]
                                  (swap-term-and-voted-for-info

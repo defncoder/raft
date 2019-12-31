@@ -52,7 +52,7 @@
   "Conditionally update to new term if it is greater than existing term. If term is udpated, then voted_for is reset to NULL."
   [new-term voted-for]
   (sql/execute! (db-connection)
-                ["INSERT OR REPLACE terminfo SET recnum=1, current_term=?, voted_for=?" new-term, voted-for]))
+                ["INSERT OR REPLACE INTO terminfo VALUES (1, (?), (?))" new-term, voted-for]))
 
 (defn add-log-entry
   "Add a new log entry to the local DB."

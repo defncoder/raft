@@ -2,21 +2,41 @@
   (:require [clojure.tools.logging :as l]
             [raft.persistence :as persistence]
             [raft.state :as state])
-  (:import [raft.rpc
-            RaftContainer
-            RaftRPCGrpc
-            AppendRequest
-            AppendResponse
-            LogEntry
-            ]))
+  (:import
+   [java.util.concurrent TimeUnit]
+   [raft.rpc RaftContainer RaftRPCGrpc AppendRequest AppendResponse LogEntry]
+   [io.grpc ManagedChannelBuilder StatusRuntimeException]))
 
-(defn client-for
+;; Cached gRPC clients so they can be reused.
+(def grpc-clients (atom {}))
+
+(defn- make-new-grpc-channel
+  "Get a channel for a host."
+  [server-info]
+  (-> (ManagedChannelBuilder/forAddress (:host server-info) (:port server-info))
+      (.usePlaintext)
+      .build))
+
+(defn- make-new-grpc-client
   "Construct a gRPC client for host and port."
-  [hostname port]
-  (raft.rpc.RaftRPCGrpc/newBlockingStub
-   (-> (io.grpc.ManagedChannelBuilder/forAddress hostname port)
-       (.usePlaintext)
-       .build)))
+  [server-info timeout]
+  (-> (make-new-grpc-channel server-info)
+      (raft.rpc.RaftRPCGrpc/newBlockingStub)
+      ))
+
+(defn- client-for-server
+  "Get a gRPC client to communicate with a particular server."
+  [server-info timeout]
+  ;; (l/info @grpc-clients)
+
+  (if-let [client (get @grpc-clients server-info)]
+    (do
+      ;; (l/info "Channel state for server" (:port server-info) "is"  (-> client (.getChannel) (.getState false)))
+      (.withDeadlineAfter client timeout TimeUnit/MILLISECONDS))
+    (let [new-client (make-new-grpc-client server-info timeout)]
+      (l/info "Created new client: " new-client)
+      (swap! grpc-clients #(assoc %1 server-info new-client))
+      (.withDeadlineAfter new-client timeout TimeUnit/MILLISECONDS))))
 
 (defn loop-index
   "Loop with index on a sequable collection."
@@ -68,10 +88,10 @@
 
 (defn make-append-request
   "Make an AppendRequest GRPC call."
-  [host port term]
+  [server-info term timeout]
   (let [request (construct-append-request {:leader-term term
                                            :log-entries (construct-test-log-entries 2)})
-        response (.appendEntries (client-for host port) request)
+        response (.appendEntries (client-for-server server-info timeout) request)
         current-term (state/get-current-term)
         new-term (.getTerm response)]
     (if (< current-term new-term)
@@ -80,5 +100,40 @@
       (l/info "Successful response with term result:" (.getTerm response) (.getSuccess response))
       (l/info "Not successful response." (.getTerm response) (.getSuccess response)))))
 
-(defn append-request [host port term]
-  (make-append-request host port term))
+(defn append-request [server-info term timeout]
+  (make-append-request server-info term timeout))
+
+(defn construct-vote-request
+  "Construct a vote request message to be sent to all other servers."
+  []
+  (let [last-log-entry (persistence/get-last-log-entry)]
+    (-> (raft.rpc.VoteRequest/newBuilder)
+        (.setTerm (state/get-current-term))
+        (.setCandidateId (state/get-this-server-name))
+        (.setLastLogIndex (:log_index last-log-entry 0))
+        (.setLastLogTerm (:term last-log-entry 0))
+        (.build))))
+
+(defn make-vote-request
+  "Make a vote request to a server."
+  [server-info vote-request timeout]
+  (l/info "Making vote request to: " server-info)
+
+  (try
+    (let [grpc-client (client-for-server server-info timeout)
+          response (.requestVote grpc-client vote-request)]
+      (l/info "Received response. Term: " (.getTerm response) "Vote granted: " (.getVoteGranted response))
+      {:response response})
+    (catch StatusRuntimeException e
+      (do
+        ;; (if (= 10020 (:port server-info))
+        ;;   (l/info "Exception: " e))
+        ;; (l/info "Exception: " e)
+        {:error e}))
+    (finally)))
+
+(defn make-vote-requests
+  "Make a request for vote to a server."
+  [servers timeout]
+  (let [vote-request (construct-vote-request)]
+    (doall (pmap (fn [server-info] (make-vote-request server-info vote-request timeout)) servers))))
