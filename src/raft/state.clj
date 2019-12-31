@@ -151,7 +151,7 @@
 (defn update-current-term-and-voted-for
   "Synchronously update the current-term and voted-for values and their corresponding persistent state."
   [new-term new-voted-for]
-  (l/info "Update current term and voted for: " new-term new-voted-for)
+  ;; (l/info "Update current term and voted for: " new-term new-voted-for)
   (swap! current-term-and-vote (fn [old-info]
                                  (swap-term-and-voted-for-info old-info new-term new-voted-for))))
 

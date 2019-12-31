@@ -176,11 +176,11 @@
         candidate-last-log-term (.getLastLogTerm request)
         candidate-last-log-index (.getLastLogIndex request)
         current-term (state/get-current-term)]
-    (l/info "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
+    ;; (l/info "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
     (if (< candidate-term current-term)
       false
       (let [voted-for (state/get-voted-for)]
-        (l/info "Voted for is: " voted-for)
+        ;; (l/info "Voted for is: " voted-for)
         (and (or (nil? voted-for) (= candidate-id voted-for))
              (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))))))
 
@@ -188,25 +188,27 @@
   "Bookkeeping mechanism once vote is granted to someone."
   [request]
   (state/inc-voted-sequence)
-  (state/update-current-term-and-voted-for (.getTerm request) (.getCandidateId request)))
+  ;; (l/info "Updating current term and voted for to: " (.getTerm request) (.getCandidateId request))
+  (state/update-current-term-and-voted-for (.getTerm request) (.getCandidateId request))
+  ;; (l/info "Reading current term and voted for: " (state/get-current-term) (state/get-voted-for))
+  )
 
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
   (let [current-term (state/get-current-term)
-        last-voted-for (state/get-voted-for)
-        convert-to-follower? (> (.getTerm request) current-term)
-        grant-vote? (should-vote-for-candidate? request)]
-
-    (if grant-vote?
-      (remember-vote-granted request))
-    
-    (if (or convert-to-follower? grant-vote?)
+        last-voted-for (state/get-voted-for)]
+    (if (> (.getTerm request) current-term)
       (do
-        (l/info "Ooops. Changing to a follower**************************")        
+        (l/info "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
+        (state/update-current-term-and-voted-for (.getTerm request) nil)
         (state/set-server-state :follower)))
     
-    (make-vote-response current-term grant-vote?)))
+    (if (should-vote-for-candidate? request)
+      (do
+        (remember-vote-granted request)
+        (make-vote-response current-term true))
+      (make-vote-response current-term false))))
 
 (defn -appendEntries [this request response]
   (doto response
