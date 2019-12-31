@@ -32,14 +32,23 @@
 
 (defn- initial-index-map
   "Make a next-index map for known servers."
-  [num-servers leader-last-log-index]
-  (reduce #(assoc %1 %2 leader-last-log-index) {} (take num-servers (range 1 (inc num-servers)))))
+  [servers leader-last-log-index]
+  (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
 
-(defn init-with-num-servers
+(defn- server-names
+  "Get an array of server names from server deployment info."
+  [servers]
+  (l/info servers)
+  (map #(str (:host %1) ":" (:port %1)) servers))
+
+(defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
-  [num-servers leader-last-log-index]
-  (swap! next-index (fn [_] (initial-index-map num-servers leader-last-log-index)))
-  (swap! match-index (fn [_] (initial-index-map num-servers 0))))
+  [servers leader-last-log-index]
+  (let [names (server-names servers)]
+    (swap! next-index (fn [_] (initial-index-map names leader-last-log-index)))
+    (swap! match-index (fn [_] (initial-index-map names 0)))
+    (l/info "Next index: " @next-index)
+    (l/info "Match index: " @match-index)))
 
 (defn- set-index-value
   "Set the association for key to value in a map wrapped inside an atom."

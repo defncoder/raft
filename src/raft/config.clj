@@ -34,3 +34,11 @@
 (defonce config (get-current-env-config))
 
 (l/info "Config is: " config)
+
+(defn read-deployment-details
+  "Read deployment details from a supplied file."
+  [f]
+  (->
+   (io/file f)
+   (slurp)
+   (edn/read-string)))

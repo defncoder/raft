@@ -7,25 +7,29 @@
    [raft.grpcservice :as service]
    [raft.grpcclient :as client]
    [raft.state :as state]
-   ))
+
+   [raft.config :as config]))
 
 (def cli-options
   ;; An option with a required argument
-  [["-p" "--port PORT" "Port number"
-    :default (+ 10000 (rand-int 30000))
-    :parse-fn #(Integer/parseInt %)
-    :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
+  [
+   ;; ["-p" "--port PORT" "Port number"
+   ;;  :default (+ 10000 (rand-int 30000))
+   ;;  :parse-fn #(Integer/parseInt %)
+   ;;  :validate [#(< 0 % 0x10000) "Must be a number between 0 and 65536"]]
 
-   ["-c" "--count COUNT" "Count of servers"
-    :default 5
-    :parse-fn #(Integer/parseInt %)
-    :validate [#(<= 3 % 7) "Must be a number between 3 and 7"]]
+   ;; ["-c" "--count COUNT" "Count of servers"
+   ;;  :default 5
+   ;;  :parse-fn #(Integer/parseInt %)
+   ;;  :validate [#(<= 3 % 7) "Must be a number between 3 and 7"]]
    
-   ;; Server name
-   ["-n" "--name NAME" "Name of server"
-    ;; :id :name
-    :default "localhost"
-    ]])
+   ;; This server name
+   ["-i" "--index INDEX" "Index of this server in the deployment list."
+    :id :index
+    :default 0
+    :parse-fn #(Integer/parseInt %)
+    ]
+   ])
 
 (defn make-test-client-calls
   "docstring"
@@ -42,17 +46,22 @@
   [& args]
   (l/info "Command line args is:" *command-line-args*)
   (l/info "Parsed args: " (cli/parse-opts args cli-options))
+  (l/info "Deployment details: " (config/read-deployment-details "deployment.edn"))
+  ;; read-deployment-details
   (let [options (:options (cli/parse-opts args cli-options))
-        num-servers (:count options)
-        hostname (:name options)
-        port (:port options)]
+        deployment (config/read-deployment-details "deployment.edn")
+        this-server (nth (:servers deployment) (:index options))
+        ;; num-servers (:count options)
+        ;; hostname (:name options)
+        ;; port (:port options)
+        ]
     (persistence/migrate-db)
     (state/read-term-and-last-voted-for)
-    (state/init-with-num-servers (:count options) 0)
+    (state/init-with-servers (:servers deployment) 0)
     ;; (persistence/add-log-entry 1 "{name: 'Blah1', address: 'Main St.'}")
     ;; (persistence/add-log-entry 2 "{name: 'Blah2', address: 'Wall St.'}")
-    (l/info "Now listening for gRPC requests on port" port)
-    (if-let [server (service/start port)]
+    (l/info "Now listening for gRPC requests on port" (:port this-server))
+    (if-let [server (service/start (:port this-server))]
       (do
-        (make-test-client-calls hostname port)
+        (make-test-client-calls (:host this-server) (:port this-server))
         (.awaitTermination server)))))
