@@ -29,6 +29,7 @@
 (defn candidate-operations
   "Work to do as a candidate."
   [timeout]
+  ;; (l/info "Candidate operations...")
   (state/vote-for-self)
   (client/make-vote-requests (state/get-other-servers) timeout))
 
@@ -37,10 +38,23 @@
   [server-name]
   (async/thread
     (loop []
-      (let [election-timeout (election/choose-election-timeout)]
+      (let [append-sequence (state/get-append-entries-call-sequence)
+            voted-sequence (state/get-voted-sequence)
+            election-timeout (election/choose-election-timeout)]
         (Thread/sleep election-timeout)
-        (l/info "Woke up from election timeout of " election-timeout "milliseconds.")
-        (candidate-operations election-timeout)
+        ;; (l/info "Woke up from election timeout of " election-timeout "milliseconds.")
+
+        ;; If election timeout elapses without receiving AppendEntriesRPC from current leader
+        ;; or granting vote to candidate then convert to candidate.
+        (if (and (= append-sequence (state/get-append-entries-call-sequence))
+                 (= voted-sequence (state/get-voted-sequence)))
+          (do
+            ;; (l/info "That's it. I'm becoming a candidate!!!!!")
+            (state/set-server-state :candidate)))
+        
+        (if (= (state/get-server-state) :candidate)
+          (candidate-operations election-timeout))
+
         (recur)))))
 
 (defn start-raft-service [server-info]
@@ -139,40 +153,59 @@
       (.setVoteGranted vote-granted?)
       (.build)))
 
-;; Raft determines which of two logs is more up-to-dateby comparing the index and term of the last entries in thelogs. If the logs have last entries with different terms, thenthe log with the later term is more up-to-date. If the logsend with the same term, then whichever log is longer ismore up-to-date.
+;; Raft determines which of two logs is more up-to-date by comparing the index and term of the last entries in the logs.
+;; If the logs have last entries with different terms, then the log with the later term is more up-to-date.
+;; If the logs end with the same term, then whichever log is longer is more up-to-date.
 (defn is-candidate-up-to-date?
   "Are a candidate's log entries up to date?"
   [candidate-last-log-index candidate-last-log-term]
   (if-let [last-log-entry (persistence/get-last-log-entry)]
-    (if (not= candidate-last-log-term (:term_number last-log-entry))
-      (> candidate-last-log-term (:term_number last-log-entry))
-      (>= candidate-last-log-index (:log_index last-log-entry)))
+    (let [last-log-term (:term_number last-log-entry)
+          last-log-index (:log_index last-log-entry)]
+      (if (= candidate-last-log-term last-log-term)
+        (>= candidate-last-log-index last-log-index)
+        (> candidate-last-log-term last-log-term)))
     true))
 
-(defn can-vote-for-candidate?
+(defn should-vote-for-candidate?
   "Can this server vote for a candidate?"
-  [candidate-term candidate-id candidate-last-log-index candidate-last-log-term]
-  (let [current-term (state/get-current-term)]
+  [request]
+
+  (let [candidate-term (.getTerm request)
+        candidate-id (.getCandidateId request)
+        candidate-last-log-term (.getLastLogTerm request)
+        candidate-last-log-index (.getLastLogIndex request)
+        current-term (state/get-current-term)]
+    (l/info "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
     (if (< candidate-term current-term)
       false
       (let [voted-for (state/get-voted-for)]
-        (or (nil? voted-for) (and (= candidate-id voted-for) (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term)))))))
+        (l/info "Voted for is: " voted-for)
+        (and (or (nil? voted-for) (= candidate-id voted-for))
+             (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))))))
 
 (defn remember-vote-granted
   "Bookkeeping mechanism once vote is granted to someone."
-  [term candidate-id]
+  [request]
   (state/inc-voted-sequence)
-  (state/update-current-term-and-voted-for term candidate-id))
+  (state/update-current-term-and-voted-for (.getTerm request) (.getCandidateId request)))
 
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
   (let [current-term (state/get-current-term)
         last-voted-for (state/get-voted-for)
-        grant-vote? (and (>= (.getTerm request) current-term)
-                         (or (nil? last-voted-for)
-                             (= (.getCandidateId request) last-voted-for)))
-        _ (and grant-vote? (remember-vote-granted (.getTerm request) (.getCandidateId request)))]
+        convert-to-follower? (> (.getTerm request) current-term)
+        grant-vote? (should-vote-for-candidate? request)]
+
+    (if grant-vote?
+      (remember-vote-granted request))
+    
+    (if (or convert-to-follower? grant-vote?)
+      (do
+        (l/info "Ooops. Changing to a follower**************************")        
+        (state/set-server-state :follower)))
+    
     (make-vote-response current-term grant-vote?)))
 
 (defn -appendEntries [this request response]

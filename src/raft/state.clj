@@ -35,6 +35,29 @@
 ;; Vector of other servers.
 (def other-servers (atom []))
 
+;; State of this server: follower OR candidate OR leader
+(def server-state (atom :follower))
+
+(defn get-server-state
+  "Get the current server state."
+  []
+  @server-state)
+
+(defn set-server-state
+  "Change server state."
+  [new-state]
+  (swap! server-state (fn [_] new-state)))
+
+(defn get-append-entries-call-sequence
+  "Get value of AppendEntries call sequence number."
+  []
+  @append-entries-call-sequence)
+
+(defn get-voted-sequence
+  "Get value of VotedFor sequence."
+  []
+  @voted-sequence)
+
 (defn- initial-index-map
   "Make a next-index map for known servers."
   [servers leader-last-log-index]

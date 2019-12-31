@@ -117,12 +117,14 @@
 (defn make-vote-request
   "Make a vote request to a server."
   [server-info vote-request timeout]
-  (l/info "Making vote request to: " server-info)
+  ;; (l/info "Making vote request to: " server-info)
 
   (try
     (let [grpc-client (client-for-server server-info timeout)
           response (.requestVote grpc-client vote-request)]
-      (l/info "Received response. Term: " (.getTerm response) "Vote granted: " (.getVoteGranted response))
+      (if (.getVoteGranted response)
+        (l/info "Received vote from server: " server-info))
+      ;; (l/info "Received response. Term: " (.getTerm response) "Vote granted: " (.getVoteGranted response))
       {:response response})
     (catch StatusRuntimeException e
       (do
