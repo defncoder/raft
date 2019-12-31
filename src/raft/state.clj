@@ -1,6 +1,7 @@
 (ns raft.state
   (:require [raft.persistence :as persistence]
-            [clojure.tools.logging :as l]))
+            [clojure.tools.logging :as l]
+            [raft.util :as util]))
 
 ;;; Volatile state on all servers
 ;; index of highest log entry known to becommitted (initialized to 0, increases monotonically)
@@ -38,8 +39,7 @@
 (defn- server-names
   "Get an array of server names from server deployment info."
   [servers]
-  (l/info servers)
-  (map #(str (:host %1) ":" (:port %1)) servers))
+  (map #(util/make-qualified-server-name %1) servers))
 
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
@@ -97,3 +97,8 @@
        (ref-set current-term new-term)
        (ref-set voted-for new-voted-for)
        (persistence/save-current-term-and-voted-for new-term new-voted-for)))))
+
+(defn vote-for-self
+  "Vote for self in a new term."
+  [server-name]
+  (update-current-term-and-voted-for (inc (get-current-term)) server-name))

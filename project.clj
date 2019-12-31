@@ -35,7 +35,9 @@
                  [io.grpc/grpc-protobuf "1.26.0"]
                  [io.grpc/grpc-stub "1.26.0"]
 
-                 [org.clojure/tools.cli "0.4.2"]                 
+                 [org.clojure/tools.cli "0.4.2"]
+
+                 [org.clojure/core.async "0.6.532"]
                  ]
   :plugins [
             ;; [lein-cloverage "1.0.13"]

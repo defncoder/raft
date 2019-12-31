@@ -1,8 +1,11 @@
 (ns raft.grpcservice
   (:require
    [clojure.tools.logging :as l]
+   [clojure.core.async :as async]
    [raft.persistence :as persistence]
    [raft.state :as state]
+   [raft.election :as election]
+   [raft.util :as util]   
    )
   (:import
    [io.grpc.stub StreamObserver]
@@ -20,12 +23,28 @@
   (:gen-class
    :name raft.grpcservice.RaftRPCImpl
    :extends
-   raft.rpc.RaftRPCGrpc$RaftRPCImplBase)  
+   raft.rpc.RaftRPCGrpc$RaftRPCImplBase))
+
+(defn candidate-operations
+  "Work to do as a candidate."
+  [server-name]
   )
 
-(defn start [port]
+(defn service-thread
+  "Main loop for service."
+  [server-name]
+  (async/thread
+    (loop []
+      (let [election-timeout (election/choose-election-timeout)]
+        (Thread/sleep election-timeout)
+        (l/info "Woke up from election timeout of " election-timeout "milliseconds.")
+        (recur)))))
+
+(defn start-raft-service [server-info]
   (l/info "About to start gRPC service")
-  (let [raft-service (new raft.grpcservice.RaftRPCImpl)
+  (let [port (:port server-info)
+        server-name (util/make-qualified-server-name server-info)
+        raft-service (new raft.grpcservice.RaftRPCImpl)
         server (-> (ServerBuilder/forPort port)
                    (.addService raft-service)
                    (.build)
@@ -36,6 +55,7 @@
                     (l/info "Shutdown hook invoked")
                     (if (not (nil? server))
                       (.shutdown server))))))
+    (service-thread server-name)
     server))
 
 (defn is-heartbeat-request?

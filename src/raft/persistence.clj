@@ -8,29 +8,43 @@
             [raft.migration :as migration])
   (:gen-class))
 
-(def system (component/system-map
-             :database
-             (database/make-db-connection (:db-spec config/config))))
+(def system nil)
 
-(alter-var-root #'system component/start)
+(defn- make-db-spec
+  "Make the map with the component info."
+  [server-name]
+  (assoc (:db-spec config/config) :dbname (str server-name ".db")))
+
+(defn- start-db-component
+  "Start the DB component."
+  [server-name]
+  (let [db-spec (make-db-spec server-name)]
+    (component/start (component/system-map
+                      :database
+                      (database/make-db-connection db-spec)))))
 
 (defn- db-connection
   "Get a connection from the connection pool."
   []
   @(:connection (:database system)))
 
+(defn init-db-connection
+  "Initialize DB connection and set up the system component."
+  [server-name]
+  (alter-var-root #'system (fn [_] (start-db-component server-name))))
+
 (defn get-current-term
   "Read the current term from persistent storage."
   []
-  (l/info "Current term query result is: " (sql/query (db-connection) ["SELECT current_term FROM terminfo LIMIT 1"]))
-  (-> (sql/query (db-connection) ["SELECT current_term FROM terminfo LIMIT 1"])
+  (l/info "Current term query result is: " (sql/query (db-connection) ["SELECT current_term FROM terminfo WHERE recnum=1"]))
+  (-> (sql/query (db-connection) ["SELECT current_term FROM terminfo WHERE recnum=1"])
       (first)
       (:current_term 0)))
 
 (defn get-voted-for
   "Get the candidateId of the candidate this server voted for."
   []
-  (-> (sql/query (db-connection) ["SELECT voted_for FROM terminfo LIMIT 1"])
+  (-> (sql/query (db-connection) ["SELECT voted_for FROM terminfo WHERE recnum=1"])
       (first)
       (:voted_for nil)))
 
@@ -38,7 +52,7 @@
   "Conditionally update to new term if it is greater than existing term. If term is udpated, then voted_for is reset to NULL."
   [new-term voted-for]
   (sql/execute! (db-connection)
-                ["UPDATE terminfo set current_term=?, voted_for=?" new-term, voted-for]))
+                ["INSERT OR REPLACE terminfo SET recnum=1, current_term=?, voted_for=?" new-term, voted-for]))
 
 (defn add-log-entry
   "Add a new log entry to the local DB."

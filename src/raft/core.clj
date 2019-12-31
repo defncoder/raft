@@ -7,7 +7,7 @@
    [raft.grpcservice :as service]
    [raft.grpcclient :as client]
    [raft.state :as state]
-
+   [raft.util :as util]
    [raft.config :as config]))
 
 (def cli-options
@@ -47,21 +47,24 @@
   (l/info "Command line args is:" *command-line-args*)
   (l/info "Parsed args: " (cli/parse-opts args cli-options))
   (l/info "Deployment details: " (config/read-deployment-details "deployment.edn"))
-  ;; read-deployment-details
-  (let [options (:options (cli/parse-opts args cli-options))
-        deployment (config/read-deployment-details "deployment.edn")
-        this-server (nth (:servers deployment) (:index options))
-        ;; num-servers (:count options)
-        ;; hostname (:name options)
-        ;; port (:port options)
-        ]
+
+  (let [parsed-info (cli/parse-opts args cli-options)
+        options (:options parsed-info)
+        deployment-file (first (:arguments parsed-info))
+        deployment (config/read-deployment-details deployment-file)
+        servers (:servers deployment)
+        this-server (nth servers (:index options))]
+    (persistence/init-db-connection (util/make-qualified-server-name this-server))
     (persistence/migrate-db)
     (state/read-term-and-last-voted-for)
-    (state/init-with-servers (:servers deployment) 0)
-    ;; (persistence/add-log-entry 1 "{name: 'Blah1', address: 'Main St.'}")
-    ;; (persistence/add-log-entry 2 "{name: 'Blah2', address: 'Wall St.'}")
+    (state/init-with-servers servers 0)
     (l/info "Now listening for gRPC requests on port" (:port this-server))
-    (if-let [server (service/start (:port this-server))]
+    (if-let [server (service/start-raft-service this-server)]
       (do
         (make-test-client-calls (:host this-server) (:port this-server))
         (.awaitTermination server)))))
+
+
+
+;; (persistence/add-log-entry 1 "{name: 'Blah1', address: 'Main St.'}")
+;; (persistence/add-log-entry 2 "{name: 'Blah2', address: 'Wall St.'}")

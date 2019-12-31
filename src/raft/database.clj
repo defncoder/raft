@@ -11,7 +11,7 @@
   (l/info "DB Spec is: " spec)
   (let [hds (doto (HikariDataSource.)
               ;; (.setProperty "dataSourceClassName" (:classname spec))
-              (.setJdbcUrl (str "jdbc:" (:subprotocol spec) ":" (:subname spec)))
+              (.setJdbcUrl (str "jdbc:" (:subprotocol spec) ":" (:directory spec) "/" (:dbname spec)))
               ;; (.setUsername (:user spec))
               ;; (.setPassword (:password spec))
               (.setConnectionTimeout 10000)

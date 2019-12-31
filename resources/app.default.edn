@@ -14,7 +14,8 @@
  :db-spec {
            :classname "org.sqlite.SQLiteDataSource"
            :subprotocol "sqlite"
-           :subname "/home/easwar/data/raft/raft1.db"
+           :directory "/home/easwar/data/raft"
+           ;; :subname "/home/easwar/data/raft/raft1.db"
            :user "profileapp"
            :password "clojure-and-emacs-rock"
            }
