@@ -28,8 +28,7 @@
 ;; A synchronized set of in-memory values that mirrors the persistent values of current_term and voted_for within
 ;; the terminfo DB table.
 ;; ALL updates to these persistent values will only be done within a coordinated transaction of these related refs.
-(def current-term (ref 0))
-(def voted-for (ref nil))
+(def current-term-and-vote (atom {:current-term 0 :voted-for nil}))
 
 (defn- initial-index-map
   "Make a next-index map for known servers."
@@ -78,27 +77,40 @@
 (defn get-current-term
   "Get the current term value."
   []
-  @current-term)
+  (:current-term @current-term-and-vote))
 
-(defn read-term-and-last-voted-for
+(defn get-voted-for
+  "Get name of server this server instance voted for."
+  []
+  (:voted-for @current-term-and-vote))
+
+(defn init-term-and-last-voted-for
   "Initialize current term and last voted for values from persistent storage."
   []
   (l/info "Current term is: " (persistence/get-current-term))
-  (dosync
-   (ref-set current-term (persistence/get-current-term))
-   (ref-set voted-for (persistence/get-voted-for))))
+  (swap! current-term-and-vote (fn [_]
+                                 {:current-term (persistence/get-current-term)
+                                  :voted-for (persistence/get-voted-for)})))
+
+(defn- swap-term-and-voted-for-info
+  "Helper to swap current term and voted for info."
+  [old-info new-term new-voted-for]
+  (if (>= new-term (:current-term old-info))
+    (let [new-info {:current-term new-term
+                    :voted-for new-voted-for}]
+      (persistence/save-current-term-and-voted-for new-term new-voted-for)
+      new-info)
+    old-info))
 
 (defn update-current-term-and-voted-for
   "Synchronously update the current-term and voted-for values and their corresponding persistent state."
   [new-term new-voted-for]
-  (dosync
-   (if (>= new-term @current-term)
-     (do 
-       (ref-set current-term new-term)
-       (ref-set voted-for new-voted-for)
-       (persistence/save-current-term-and-voted-for new-term new-voted-for)))))
+  (l/info "Update current term and voted for: " new-term new-voted-for)
+  (swap! current-term-and-vote (fn [old-info]
+                                 (swap-term-and-voted-for-info old-info new-term new-voted-for))))
 
 (defn vote-for-self
-  "Vote for self in a new term."
+  "Synchronously update the current-term and voted-for values and their corresponding persistent state."
   [server-name]
-  (update-current-term-and-voted-for (inc (get-current-term)) server-name))
+  (swap! current-term-and-vote (fn [old-info]
+                                 (swap-term-and-voted-for-info old-info (inc (:current-term old-info)) server-name))))

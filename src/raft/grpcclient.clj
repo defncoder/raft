@@ -75,7 +75,7 @@
         current-term (state/get-current-term)
         new-term (.getTerm response)]
     (if (< current-term new-term)
-      (persistence/save-current-term-and-voted-for new-term nil))
+      (state/update-current-term-and-voted-for new-term nil))
     (if (.getSuccess response)
       (l/info "Successful response with term result:" (.getTerm response) (.getSuccess response))
       (l/info "Not successful response." (.getTerm response) (.getSuccess response)))))

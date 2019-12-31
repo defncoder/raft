@@ -106,7 +106,7 @@
 (defn append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
   [request]
-  (persistence/save-current-term-and-voted-for (.getTerm request) nil)
+  (state/update-current-term-and-voted-for (.getTerm request) nil)
   (delete-conflicting-entries-for-request request)
   (persistence/append-new-log-entries (.getLogEntryList request))
   (reset! state/commit-index (new-commit-index-for-request request @state/commit-index))
@@ -120,7 +120,7 @@
     ;; Handle heartbeat requests.
     (is-heartbeat-request? request) (do
                                       ;; Update current term if necessary.
-                                      (persistence/save-current-term-and-voted-for (.getTerm request) nil)
+                                      (state/update-current-term-and-voted-for (.getTerm request) nil)
                                       ;; Respond to heartbeat.
                                       (heartbeat-response))
     ;; Request is not acceptable. See is-unacceptable-append-request? for details.
@@ -152,20 +152,20 @@
   (let [current-term (state/get-current-term)]
     (if (< candidate-term current-term)
       false
-      (let [voted-for (persistence/get-voted-for)]
+      (let [voted-for (state/get-voted-for)]
         (or (nil? voted-for) (and (= candidate-id voted-for) (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term)))))))
 
 (defn remember-vote-granted
   "Bookkeeping mechanism once vote is granted to someone."
   [term candidate-id]
   (state/inc-voted-sequence)
-  (persistence/save-current-term-and-voted-for term candidate-id))
+  (state/update-current-term-and-voted-for term candidate-id))
 
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
   (let [current-term (state/get-current-term)
-        last-voted-for (persistence/get-voted-for)
+        last-voted-for (state/get-voted-for)
         grant-vote? (and (>= (.getTerm request) current-term)
                          (or (nil? last-voted-for)
                              (= (.getCandidateId request) last-voted-for)))

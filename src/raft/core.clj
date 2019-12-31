@@ -56,15 +56,10 @@
         this-server (nth servers (:index options))]
     (persistence/init-db-connection (util/make-qualified-server-name this-server))
     (persistence/migrate-db)
-    (state/read-term-and-last-voted-for)
+    (state/init-term-and-last-voted-for)
     (state/init-with-servers servers 0)
     (l/info "Now listening for gRPC requests on port" (:port this-server))
     (if-let [server (service/start-raft-service this-server)]
       (do
         (make-test-client-calls (:host this-server) (:port this-server))
         (.awaitTermination server)))))
-
-
-
-;; (persistence/add-log-entry 1 "{name: 'Blah1', address: 'Main St.'}")
-;; (persistence/add-log-entry 2 "{name: 'Blah2', address: 'Wall St.'}")
