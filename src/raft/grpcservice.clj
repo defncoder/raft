@@ -26,12 +26,30 @@
    :extends
    raft.rpc.RaftRPCGrpc$RaftRPCImplBase))
 
+(defn- count-votes-received
+  "Count the number of votes received from all responses."
+  [responses]
+  (count (filter #(some-> %1 :response (.getVoteGranted)) responses)))
+
+(defn- won-election?
+  "Did this server win the election?"
+  [responses]
+  (let [num-responses (count responses)
+        num-votes-received (count-votes-received responses)]
+    (and (> num-responses 0)
+         (> num-votes-received 0)
+         (>= (* 2 num-votes-received) num-responses))))
+
 (defn candidate-operations
   "Work to do as a candidate."
   [timeout]
   ;; (l/info "Candidate operations...")
   (state/vote-for-self)
-  (client/make-vote-requests (state/get-other-servers) timeout))
+  (let [other-servers (state/get-other-servers)
+        responses (client/make-vote-requests other-servers timeout)]
+    (when (won-election? responses)
+      (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+      (state/set-server-state :leader))))
 
 (defn service-thread
   "Main loop for service."
