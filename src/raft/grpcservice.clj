@@ -43,14 +43,25 @@
     (apply max terms)
     0))
 
+(defn- valid-responses
+  "Filter for valid responses."
+  [responses]
+  (filter some? (map #(:response %1) responses)))
+
+(defn- max-term-response
+  "Max term index from responses. Assume responses are valid and is an array of objects with a
+  .getTerm function implemented."
+  [responses]
+  (reduce #(if (> (.getTerm %1) (.getTerm %2)) %1 %2) responses))
+
 (defn- process-terms-in-responses
   "Process term fields in responses. This is in case one of the other servers
   has a higher current-term. If so, this server must become a follower."
   [responses]
   (let [max-term (max-term-from-responses responses)]
-    ;; (l/info "Max term from responses: " max-term)
+    (l/trace "Max term from responses: " max-term)
     (when (> max-term (state/get-current-term))
-      (l/info "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
+      (l/debug "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
       (state/update-current-term-and-voted-for max-term nil)
       (state/become-follower))))
 
@@ -59,7 +70,7 @@
   [timeout]
   (async/thread
     (do
-      ;; (l/info "Sending heartbeat requests to other servers...")
+      (l/trace "Sending heartbeat requests to other servers...")
       (let [responses (client/make-heartbeat-requests (state/get-other-servers) timeout)]
         (process-terms-in-responses responses)))))
 
@@ -73,7 +84,7 @@
 (defn- start-new-election
   "Work to do as a candidate."
   [timeout]
-  (l/info "Starting new election...")
+  (l/debug "Starting new election...")
   (state/inc-current-term-and-vote-for-self)
   (let [other-servers (state/get-other-servers)
         responses (client/make-vote-requests other-servers timeout)]
@@ -97,7 +108,7 @@
    (not= prev-append-sequence (state/get-append-entries-call-sequence))
    (not= prev-voted-sequence (state/get-voted-sequence))))
 
-(defn service-thread
+(defn- service-thread
   "Main loop for service."
   [server-name]
   (async/thread
@@ -109,7 +120,7 @@
             grpc-timeout 80]
         ;; Sleep for idle-timeout to see if some other server might send requests.
         (Thread/sleep idle-timeout)
-        ;; (l/info "Woke up from idle timeout of" idle-timeout "milliseconds.")
+        (l/trace "Woke up from idle timeout of" idle-timeout "milliseconds.")
 
         (cond
           (state/is-leader?) (send-heartbeat-to-servers grpc-timeout)
@@ -139,81 +150,71 @@
     (service-thread server-name)
     server))
 
-(defn is-heartbeat-request?
-  "Is this a heartbeat request."
-  [request]
-  (empty? (.getLogEntryList request)))
-
-(defn is-unacceptable-append-request?
-  "Check if req should NOT be accepted.
-  1. Request is unacceptable if its term < currentTerm (§5.1)
-  2. Request is unacceptable if log doesn’t contain an entry at index request.prevLogIndex whose
-     term matches request.prevLogTerm (§5.3).
+(defn- can-append-logs?
+  "Check if logs from AppendRequest can be used:
+  1. Logs in request cannot be used if its term < currentTerm (§5.1)
+  2. Logs in request cannot be used if local log doesn’t contain
+     an entry at index request.prevLogIndex whose term matches request.prevLogTerm (§5.3).
   See http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf for details."
-  [req]
-  (or (< (.getTerm req) (state/get-current-term))
-      (not (persistence/has-log-at-index-with-term? (.getPrevLogIndex req) (.getPrevLogTerm req)))))
+  [request]
+  (and (not-empty (.getLogEntryList request))
+       (>= (.getTerm request) (state/get-current-term))
+       (persistence/has-log-at-index-with-term? (.getPrevLogIndex request) (.getPrevLogTerm request))))
 
-(defn new-commit-index-for-request
+(defn- new-commit-index-for-request
   "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry in request)"
   [request prev-commit-index]
   (if (> (.getLeaderCommitIndex request) prev-commit-index)
     (min (.getLeaderCommitIndex request) (.getLogIndex (last (.getLogEntryList request))))
     prev-commit-index))
 
-(defn make-response
+(defn- make-response
   "Make a response with the given term and success values."
   [term success?]
   (-> (AppendResponse/newBuilder)
       (.setTerm term)
-      (.setSuccess success?)
+      (.setSuccess (true? success?))
       (.build)))
 
-(defn heartbeat-response
-  "Make a heartbeat response."
-  []
-  (make-response (state/get-current-term) true))
-
-(defn unsuccessful-response
-  "Make a heartbeat response."
-  []
-  (make-response (state/get-current-term) false))
-
-(defn delete-conflicting-entries-for-request
+(defn- delete-conflicting-entries-for-request
   "Delete all existing but conflicting log entries for this request."
   [request]
+  ;; TODO: See if this can be done using a single delete statement instead of 1 for each log entry in the input.
   (map #(persistence/delete-conflicting-log-entries (.getLogIndex %1) (.getTerm %1)) (.getLogEntryList request)))
 
-(defn append-log-entries
+(defn- append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
   [request]
-  (state/update-current-term-and-voted-for (.getTerm request) nil)
   (delete-conflicting-entries-for-request request)
   (persistence/append-new-log-entries (.getLogEntryList request))
-  (reset! state/commit-index (new-commit-index-for-request request @state/commit-index))
-  (make-response (state/get-current-term) true))
+  (reset! state/commit-index (new-commit-index-for-request request @state/commit-index)))
 
-(defn handle-append-request
+(defn- handle-append-request
   "Handle an AppendEntries request."
   [request]
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
-  (when (> (.getTerm request) (state/get-current-term))
-    (state/update-current-term-and-voted-for (.getTerm request) nil))  
-  ;; If Candidate AND AppendEntries RPC received from new leader: convert to follower
-  (when (state/is-candidate?)
-    (l/info "Got AppendEntries RPC while being a candidate. Becoming a follower...")
-    (state/become-follower))
-  
-  (cond
-    ;; Handle heartbeat requests.
-    (is-heartbeat-request? request) (heartbeat-response)
-    ;; Request is not acceptable. See is-unacceptable-append-request? for details.
-    (is-unacceptable-append-request? request) (unsuccessful-response)
-    ;; Handle request with log entries.
-    :else (append-log-entries request)))
 
-(defn make-vote-response
+  (let [can-append?  (can-append-logs? request)
+        current-term (state/get-current-term)
+        response     (make-response current-term can-append?)]
+    (if can-append?
+      (append-log-entries request))
+    ;; Additional bookkeeping based on current server state.
+    ;; If request term > current term then update current term to the request term and reset
+    ;; candidate voted for.
+    (when (> (.getTerm request) current-term)
+      (state/update-current-term-and-voted-for (.getTerm request) nil))
+    
+    ;; If this server is a candidate in an election AND an AppendEntries RPC
+    ;; came in from new leader then convert to a follower.
+    (when (state/is-candidate?)
+      (l/debug "Got AppendEntries RPC from" (.getCandidateId request) "while current server was a candidate. Becoming a follower..." )
+      (state/become-follower))
+    ;; Return the response for the request.
+    response))
+
+(defn- make-vote-response
   "Make a VoteResponse"
   [term vote-granted?]
   (-> (VoteResponse/newBuilder)
@@ -224,7 +225,7 @@
 ;; Raft determines which of two logs is more up-to-date by comparing the index and term of the last entries in the logs.
 ;; If the logs have last entries with different terms, then the log with the later term is more up-to-date.
 ;; If the logs end with the same term, then whichever log is longer is more up-to-date.
-(defn is-candidate-up-to-date?
+(defn- is-candidate-up-to-date?
   "Are a candidate's log entries up to date?"
   [candidate-last-log-index candidate-last-log-term]
   (if-let [last-log-entry (persistence/get-last-log-entry)]
@@ -235,7 +236,7 @@
         (> candidate-last-log-term last-log-term)))
     true))
 
-(defn should-vote-for-candidate?
+(defn- should-vote-for-candidate?
   "Can this server vote for a candidate?"
   [request]
 
@@ -244,22 +245,20 @@
         candidate-last-log-term (.getLastLogTerm request)
         candidate-last-log-index (.getLastLogIndex request)
         current-term (state/get-current-term)]
-    ;; (l/info "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
+    (l/trace "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
     (if (< candidate-term current-term)
       false
       (let [voted-for (state/get-voted-for)]
-        ;; (l/info "Voted for is: " voted-for)
         (and (or (nil? voted-for) (= candidate-id voted-for))
              (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))))))
 
-(defn remember-vote-granted
+(defn- remember-vote-granted
   "Bookkeeping mechanism once vote is granted to someone."
   [request]
   (state/inc-voted-sequence)
-  ;; (l/info "Updating current term and voted for to: " (.getTerm request) (.getCandidateId request))
+  (l/trace "Updating current term and voted for to: " (.getTerm request) (.getCandidateId request))
   (state/update-current-term-and-voted-for (.getTerm request) (.getCandidateId request))
-  ;; (l/info "Reading current term and voted for: " (state/get-current-term) (state/get-voted-for))
-  )
+  (l/trace "Reading current term and voted for: " (state/get-current-term) (state/get-voted-for)))
 
 (defn handle-vote-request
   "Handle a VoteRequest message."
@@ -268,7 +267,7 @@
         last-voted-for (state/get-voted-for)]
     (if (> (.getTerm request) current-term)
       (do
-        (l/info "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
+        (l/debug "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
         (state/update-current-term-and-voted-for (.getTerm request) nil)
         (state/become-follower)))
     

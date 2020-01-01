@@ -85,7 +85,7 @@
                 ["DELETE FROM raftlog where log_index >= 
                     (SELECT log_index FROM raftlog WHERE log_index = ? AND term_number != ?)" new-log-index new-log-term]))
 
-(defn log-entry-as-vec
+(defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
   [log-entry]
   [(.getLogIndex log-entry) (.getTermNumber log-entry) (.getCommand log-entry)])
