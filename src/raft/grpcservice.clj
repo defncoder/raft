@@ -34,22 +34,28 @@
 (defn- won-election?
   "Did this server win the election?"
   [responses]
-  (let [num-responses (count responses)
-        num-votes-received (count-votes-received responses)]
-    (and (> num-responses 0)
-         (> num-votes-received 0)
-         (>= (* 2 num-votes-received) num-responses))))
+  (let [num-votes-received (count-votes-received responses)
+        result (and (> num-votes-received 0)
+                    (>= (* 2 num-votes-received) (count responses)))]
+    (l/info "Num votes received: " num-votes-received "Result: " result)
+    result))
 
-(defn candidate-operations
+(defn- candidate-operations
   "Work to do as a candidate."
   [timeout]
   ;; (l/info "Candidate operations...")
   (state/vote-for-self)
   (let [other-servers (state/get-other-servers)
         responses (client/make-vote-requests other-servers timeout)]
-    (when (won-election? responses)
+    (when (and (state/is-candidate?) (won-election? responses))
       (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-      (state/set-server-state :leader))))
+      (state/become-leader))))
+
+(defn- leader-operations
+  "Perform leader operations for this cycle."
+  [timeout]
+  (l/info "Sending heartbeat requests to other servers...")
+  (client/make-heartbeat-requests (state/get-other-servers) timeout))
 
 (defn service-thread
   "Main loop for service."
@@ -58,20 +64,25 @@
     (loop []
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
-            election-timeout (election/choose-election-timeout)]
-        (Thread/sleep election-timeout)
-        ;; (l/info "Woke up from election timeout of " election-timeout "milliseconds.")
+            election-timeout (election/choose-election-timeout)
+            grpc-timeout 100
+            idle-timeout (if (state/is-leader?) (quot election-timeout 2) election-timeout)]
+        (Thread/sleep idle-timeout)
+        ;; (l/info "Woke up from idle timeout of" idle-timeout "milliseconds.")
 
         ;; If election timeout elapses without receiving AppendEntriesRPC from current leader
         ;; or granting vote to candidate then convert to candidate.
-        (if (and (= append-sequence (state/get-append-entries-call-sequence))
-                 (= voted-sequence (state/get-voted-sequence)))
-          (do
-            ;; (l/info "That's it. I'm becoming a candidate!!!!!")
-            (state/set-server-state :candidate)))
+        (when (and (not (state/is-leader?))
+                   (= append-sequence (state/get-append-entries-call-sequence))
+                   (= voted-sequence (state/get-voted-sequence)))
+          (l/info "That's it. I'm becoming a candidate!!!!!")
+          (state/become-candidate))
         
-        (if (= (state/get-server-state) :candidate)
-          (candidate-operations election-timeout))
+        (if (state/is-candidate?)
+          (candidate-operations grpc-timeout))
+
+        (if (state/is-leader?)
+          (leader-operations grpc-timeout))
 
         (recur)))))
 
@@ -150,10 +161,16 @@
 (defn handle-append-request
   "Handle an AppendEntries request."
   [request]
+  ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
+  ;; If Candidate AND AppendEntries RPC received from new leader: convert to follower
+  (if (state/is-candidate?)
+    (state/become-follower))
+  
   (cond
     ;; Handle heartbeat requests.
     (is-heartbeat-request? request) (do
+                                      (l/info "Processing heartbeat request")
                                       ;; Update current term if necessary.
                                       (state/update-current-term-and-voted-for (.getTerm request) nil)
                                       ;; Respond to heartbeat.
@@ -220,7 +237,7 @@
       (do
         (l/info "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
         (state/update-current-term-and-voted-for (.getTerm request) nil)
-        (state/set-server-state :follower)))
+        (state/become-follower)))
     
     (if (should-vote-for-candidate? request)
       (do

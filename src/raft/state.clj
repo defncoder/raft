@@ -38,15 +38,45 @@
 ;; State of this server: follower OR candidate OR leader
 (def server-state (atom :follower))
 
-(defn get-server-state
+(defn- get-server-state
   "Get the current server state."
   []
   @server-state)
 
-(defn set-server-state
+(defn- set-server-state
   "Change server state."
   [new-state]
   (swap! server-state (fn [_] new-state)))
+
+(defn is-candidate?
+  "Is this server a candidate at this time?"
+  []
+  (= @server-state :candidate))
+
+(defn is-leader?
+  "Is this sever a leader at this time?"
+  []
+  (= @server-state :leader))
+
+(defn is-follower?
+  "Is this server a follower at this time?"
+  []
+  (= @server-state :follower))
+
+(defn become-leader
+  "Become a leader."
+  []
+  (set-server-state :leader))
+
+(defn become-follower
+  "Become a follower."
+  []
+  (set-server-state :follower))
+
+(defn become-candidate
+  "Become a candidate."
+  []
+  (set-server-state :candidate))
 
 (defn get-append-entries-call-sequence
   "Get value of AppendEntries call sequence number."
@@ -98,6 +128,7 @@
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
   []
+  (l/info "Incrementing append entries call sequence")
   (swap! append-entries-call-sequence inc))
 
 (defn inc-voted-sequence
@@ -141,7 +172,7 @@
 (defn- swap-term-and-voted-for-info
   "Helper to swap current term and voted for info."
   [old-info new-term new-voted-for]
-  (if (>= new-term (:current-term old-info))
+  (if (>= new-term (:current-term old-info 0))
     (let [new-info {:current-term new-term
                     :voted-for new-voted-for}]
       (persistence/save-current-term-and-voted-for new-term new-voted-for)

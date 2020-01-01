@@ -103,7 +103,31 @@
 (defn append-request [server-info term timeout]
   (make-append-request server-info term timeout))
 
-(defn construct-vote-request
+(defn- construct-heartbeat-request
+  "Construct a new heartbeat request."
+  []
+  (construct-append-request {:leader-term (state/get-current-term)
+                             :leader-id (state/get-this-server-name)}))
+
+(defn- make-heartbeat-request
+  "Make a heartbeat request to a server."
+  [server-info heartbeat-request timeout]
+  (try
+    (let [grpc-client (client-for-server server-info timeout)
+          response (.appendEntries grpc-client heartbeat-request)]
+      {:response response})
+    (catch StatusRuntimeException e
+      (do
+        {:error e}))
+    (finally)))
+
+(defn make-heartbeat-requests
+  "Send a heartbeat request to all other servers."
+  [servers timeout]
+  (let [heartbeat-request (construct-heartbeat-request)]
+    (doall (pmap (fn [server-info] (make-heartbeat-request server-info heartbeat-request timeout)) servers))))
+
+(defn- construct-vote-request
   "Construct a vote request message to be sent to all other servers."
   []
   (let [last-log-entry (persistence/get-last-log-entry)]
@@ -114,7 +138,7 @@
         (.setLastLogTerm (:term last-log-entry 0))
         (.build))))
 
-(defn make-vote-request
+(defn- make-vote-request
   "Make a vote request to a server."
   [server-info vote-request timeout]
   ;; (l/info "Making vote request to: " server-info)
