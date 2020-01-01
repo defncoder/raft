@@ -10,16 +10,8 @@
    )
   (:import
    [io.grpc.stub StreamObserver]
-   [io.grpc
-    Server
-    ServerBuilder]
-   [raft.rpc
-    AppendRequest
-    AppendResponse
-    VoteRequest
-    VoteResponse
-    RaftRPCGrpc$RaftRPCImplBase
-    ])
+   [io.grpc Server ServerBuilder]
+   [raft.rpc AppendRequest AppendResponse VoteRequest VoteResponse RaftRPCGrpc$RaftRPCImplBase])
   
   (:gen-class
    :name raft.grpcservice.RaftRPCImpl
@@ -27,35 +19,83 @@
    raft.rpc.RaftRPCGrpc$RaftRPCImplBase))
 
 (defn- count-votes-received
-  "Count the number of votes received from all responses."
+  "Count the total number of votes received from all responses plus one for self vote."
   [responses]
-  (count (filter #(some-> %1 :response (.getVoteGranted)) responses)))
+  (inc (count (filter #(some-> %1 :response (.getVoteGranted)) responses))))
 
 (defn- won-election?
   "Did this server win the election?"
   [responses]
-  (let [num-votes-received (count-votes-received responses)
-        result (and (> num-votes-received 0)
-                    (>= (* 2 num-votes-received) (count responses)))]
-    (l/info "Num votes received: " num-votes-received "Result: " result)
-    result))
+  ;; Is total votes in favor > floor(total-number-of-servers/2)
+  (> (count-votes-received responses) (quot (state/get-num-servers) 2)))
 
-(defn- candidate-operations
+(defn- term-from-response
+  "Get term value from a response."
+  [response]
+  (if-let [r (:response response)]
+    (.getTerm r)
+    0))
+
+(defn- max-term-from-responses
+  "Get max term from a collection of responses."
+  [responses]
+  (if-let [terms (seq (map term-from-response responses))]
+    (apply max terms)
+    0))
+
+(defn- process-terms-in-responses
+  "Process term fields in responses. This is in case one of the other servers
+  has a higher current-term. If so, this server must become a follower."
+  [responses]
+  (let [max-term (max-term-from-responses responses)]
+    ;; (l/info "Max term from responses: " max-term)
+    (when (> max-term (state/get-current-term))
+      (l/info "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
+      (state/update-current-term-and-voted-for max-term nil)
+      (state/become-follower))))
+
+(defn- send-heartbeat-to-servers
+  "Send heartbeat requests to other servers."
+  [timeout]
+  (async/thread
+    (do
+      ;; (l/info "Sending heartbeat requests to other servers...")
+      (let [responses (client/make-heartbeat-requests (state/get-other-servers) timeout)]
+        (process-terms-in-responses responses)))))
+
+(defn- become-a-leader
+  "Become a leader and initiate appropriate activities."
+  [timeout]
+  (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  (state/become-leader)
+  (send-heartbeat-to-servers timeout))
+
+(defn- start-new-election
   "Work to do as a candidate."
   [timeout]
-  ;; (l/info "Candidate operations...")
-  (state/vote-for-self)
+  (l/info "Starting new election...")
+  (state/inc-current-term-and-vote-for-self)
   (let [other-servers (state/get-other-servers)
         responses (client/make-vote-requests other-servers timeout)]
-    (when (and (state/is-candidate?) (won-election? responses))
-      (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-      (state/become-leader))))
+    (process-terms-in-responses responses)
+    (when (and (state/is-candidate?)
+               (won-election? responses))
+      (become-a-leader timeout))))
 
-(defn- leader-operations
-  "Perform leader operations for this cycle."
+(defn- become-a-candidate
+  "Operations to do just as this server became a candidate."
   [timeout]
-  (l/info "Sending heartbeat requests to other servers...")
-  (client/make-heartbeat-requests (state/get-other-servers) timeout))
+  (async/thread
+    (do
+      (state/become-candidate)
+      (start-new-election timeout))))
+
+(defn- got-new-rpc-requests?
+  "Did this server get either AppendEntries or VoteRequest RPC requests?"
+  [prev-append-sequence prev-voted-sequence]
+  (or
+   (not= prev-append-sequence (state/get-append-entries-call-sequence))
+   (not= prev-voted-sequence (state/get-voted-sequence))))
 
 (defn service-thread
   "Main loop for service."
@@ -65,24 +105,19 @@
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
             election-timeout (election/choose-election-timeout)
-            grpc-timeout 100
-            idle-timeout (if (state/is-leader?) (quot election-timeout 2) election-timeout)]
+            idle-timeout (if (state/is-leader?) (quot election-timeout 2) election-timeout)
+            grpc-timeout 80]
+        ;; Sleep for idle-timeout to see if some other server might send requests.
         (Thread/sleep idle-timeout)
         ;; (l/info "Woke up from idle timeout of" idle-timeout "milliseconds.")
 
-        ;; If election timeout elapses without receiving AppendEntriesRPC from current leader
-        ;; or granting vote to candidate then convert to candidate.
-        (when (and (not (state/is-leader?))
-                   (= append-sequence (state/get-append-entries-call-sequence))
-                   (= voted-sequence (state/get-voted-sequence)))
-          (l/info "That's it. I'm becoming a candidate!!!!!")
-          (state/become-candidate))
-        
-        (if (state/is-candidate?)
-          (candidate-operations grpc-timeout))
-
-        (if (state/is-leader?)
-          (leader-operations grpc-timeout))
+        (cond
+          (state/is-leader?) (send-heartbeat-to-servers grpc-timeout)
+          ;; If this server didn't receive new RPC requests that might've
+          ;; changed it to a follower, then become a candidate.
+          ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
+          ;; OR granting vote to a candidate then convert to candidate.
+          (not (got-new-rpc-requests? append-sequence voted-sequence)) (become-a-candidate grpc-timeout))
 
         (recur)))))
 
@@ -163,18 +198,16 @@
   [request]
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
+  (when (> (.getTerm request) (state/get-current-term))
+    (state/update-current-term-and-voted-for (.getTerm request) nil))  
   ;; If Candidate AND AppendEntries RPC received from new leader: convert to follower
-  (if (state/is-candidate?)
+  (when (state/is-candidate?)
+    (l/info "Got AppendEntries RPC while being a candidate. Becoming a follower...")
     (state/become-follower))
   
   (cond
     ;; Handle heartbeat requests.
-    (is-heartbeat-request? request) (do
-                                      (l/info "Processing heartbeat request")
-                                      ;; Update current term if necessary.
-                                      (state/update-current-term-and-voted-for (.getTerm request) nil)
-                                      ;; Respond to heartbeat.
-                                      (heartbeat-response))
+    (is-heartbeat-request? request) (heartbeat-response)
     ;; Request is not acceptable. See is-unacceptable-append-request? for details.
     (is-unacceptable-append-request? request) (unsuccessful-response)
     ;; Handle request with log entries.

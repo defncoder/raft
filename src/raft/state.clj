@@ -4,6 +4,9 @@
             [raft.util :as util]))
 
 ;;; Volatile state on all servers
+
+;; total number of servers
+(def num-servers (atom 0))
 ;; index of highest log entry known to becommitted (initialized to 0, increases monotonically)
 (def commit-index (atom 0))
 ;; index of highest log entry applied to statemachine (initialized to 0, increases monotonically)
@@ -38,6 +41,16 @@
 ;; State of this server: follower OR candidate OR leader
 (def server-state (atom :follower))
 
+(defn- initial-index-map
+  "Make a next-index map for known servers."
+  [servers leader-last-log-index]
+  (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
+
+(defn- server-names
+  "Get an array of server names from server deployment info."
+  [servers]
+  (map #(util/qualified-server-name %1) servers))
+
 (defn- get-server-state
   "Get the current server state."
   []
@@ -47,6 +60,11 @@
   "Change server state."
   [new-state]
   (swap! server-state (fn [_] new-state)))
+
+(defn get-num-servers
+  "Return total number of servers in this cluster."
+  []
+  @num-servers)
 
 (defn is-candidate?
   "Is this server a candidate at this time?"
@@ -88,19 +106,10 @@
   []
   @voted-sequence)
 
-(defn- initial-index-map
-  "Make a next-index map for known servers."
-  [servers leader-last-log-index]
-  (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
-
-(defn- server-names
-  "Get an array of server names from server deployment info."
-  [servers]
-  (map #(util/qualified-server-name %1) servers))
-
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
   [servers current-server leader-last-log-index]
+  (swap! num-servers (fn [_] (count servers)))
   (let [names (server-names servers)]
     (swap! next-index (fn [_] (initial-index-map names leader-last-log-index)))
     (swap! match-index (fn [_] (initial-index-map names 0)))
@@ -128,7 +137,7 @@
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
   []
-  (l/info "Incrementing append entries call sequence")
+  ;; (l/info "Incrementing append entries call sequence")
   (swap! append-entries-call-sequence inc))
 
 (defn inc-voted-sequence
@@ -186,7 +195,7 @@
   (swap! current-term-and-vote (fn [old-info]
                                  (swap-term-and-voted-for-info old-info new-term new-voted-for))))
 
-(defn vote-for-self
+(defn inc-current-term-and-vote-for-self
   "Synchronously increment the current-term and set the voted-for value
   to the current server and persist this info."
   []

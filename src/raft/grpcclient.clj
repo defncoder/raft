@@ -147,7 +147,7 @@
     (let [grpc-client (client-for-server server-info timeout)
           response (.requestVote grpc-client vote-request)]
       (if (.getVoteGranted response)
-        (l/info "Received vote from server: " server-info))
+        (l/info "Received vote from server: " server-info (.getTerm response) (state/get-current-term)))
       ;; (l/info "Received response. Term: " (.getTerm response) "Vote granted: " (.getVoteGranted response))
       {:response response})
     (catch StatusRuntimeException e
