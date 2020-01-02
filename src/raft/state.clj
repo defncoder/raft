@@ -23,7 +23,8 @@
 (def voted-sequence (atom 0))
 
 ;;; Volatile state on leaders. Reinitialized after election.
-;; For each server, index of the next log entry to send to that server(initialized to leaderlast log index + 1)
+;; For each server, index of the next log entry to send to that server
+;; (initialized to leaderlast log index + 1)
 (def next-index (atom {}))
 ;; For each server, index of highest log entry known to be replicated on server(initialized to 0, increases monotonically)
 (def match-index (atom {}))
@@ -44,6 +45,7 @@
 (defn- initial-index-map
   "Make a next-index map for known servers."
   [servers leader-last-log-index]
+  ;; (l/debug "Here..." servers leader-last-log-index)
   (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
 
 (defn- server-names
@@ -106,18 +108,24 @@
   []
   @voted-sequence)
 
+(defn reinit-next-and-match-indices
+  "Reinitialize relevant state after an election."
+  []
+  (let [names (server-names @other-servers)
+        last-log-entry (persistence/get-last-log-entry)
+        last-log-index (if (not-empty last-log-entry) (:log-index last-log-entry 0) 0)]
+    ;; (l/debug "Last log entry: " last-log-entry "Last log index: " last-log-index)
+    ;; (l/debug "Names: " names "Last log index: " last-log-index)    
+    (swap! next-index (fn [_] (initial-index-map names last-log-index)))
+    (swap! match-index (fn [_] (initial-index-map names 0)))))
+
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
-  [servers current-server leader-last-log-index]
+  [servers current-server]
   (swap! num-servers (fn [_] (count servers)))
-  (let [names (server-names servers)]
-    (swap! next-index (fn [_] (initial-index-map names leader-last-log-index)))
-    (swap! match-index (fn [_] (initial-index-map names 0)))
-    (swap! this-server (fn [_] current-server))
-    (swap! other-servers (fn [_] (filterv #(not= current-server %1) servers)))
-    (l/info "Other servers: " @other-servers)
-    (l/info "Next index: " @next-index)
-    (l/info "Match index: " @match-index)))
+  (swap! this-server (fn [_] current-server))
+  (swap! other-servers (fn [_] (filterv #(not= current-server %1) servers)))
+  (reinit-next-and-match-indices))
 
 (defn- set-index-value
   "Set the association for key to value in a map wrapped inside an atom."

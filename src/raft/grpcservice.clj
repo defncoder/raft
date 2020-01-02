@@ -116,7 +116,7 @@
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
             election-timeout (election/choose-election-timeout)
-            idle-timeout (if (state/is-leader?) (quot election-timeout 2) election-timeout)
+            idle-timeout (if (state/is-leader?) 100 election-timeout)
             grpc-timeout 80]
         ;; Sleep for idle-timeout to see if some other server might send requests.
         (Thread/sleep idle-timeout)

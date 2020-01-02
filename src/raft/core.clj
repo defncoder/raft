@@ -57,7 +57,7 @@
     (persistence/init-db-connection (util/qualified-server-name this-server))
     (persistence/migrate-db)
     (state/init-term-and-last-voted-for)
-    (state/init-with-servers servers this-server 0)
+    (state/init-with-servers servers this-server)
     (l/info "Now listening for gRPC requests on port" (:port this-server))
     (if-let [server (service/start-raft-service this-server)]
       (do
