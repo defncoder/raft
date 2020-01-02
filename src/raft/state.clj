@@ -45,7 +45,6 @@
 (defn- initial-index-map
   "Make a next-index map for known servers."
   [servers leader-last-log-index]
-  ;; (l/debug "Here..." servers leader-last-log-index)
   (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
 
 (defn- server-names
@@ -68,36 +67,6 @@
   []
   @num-servers)
 
-(defn is-candidate?
-  "Is this server a candidate at this time?"
-  []
-  (= @server-state :candidate))
-
-(defn is-leader?
-  "Is this sever a leader at this time?"
-  []
-  (= @server-state :leader))
-
-(defn is-follower?
-  "Is this server a follower at this time?"
-  []
-  (= @server-state :follower))
-
-(defn become-leader
-  "Become a leader."
-  []
-  (set-server-state :leader))
-
-(defn become-follower
-  "Become a follower."
-  []
-  (set-server-state :follower))
-
-(defn become-candidate
-  "Become a candidate."
-  []
-  (set-server-state :candidate))
-
 (defn get-append-entries-call-sequence
   "Get value of AppendEntries call sequence number."
   []
@@ -114,8 +83,6 @@
   (let [names (server-names @other-servers)
         last-log-entry (persistence/get-last-log-entry)
         last-log-index (if (not-empty last-log-entry) (:log-index last-log-entry 0) 0)]
-    ;; (l/debug "Last log entry: " last-log-entry "Last log index: " last-log-index)
-    ;; (l/debug "Names: " names "Last log index: " last-log-index)    
     (swap! next-index (fn [_] (initial-index-map names last-log-index)))
     (swap! match-index (fn [_] (initial-index-map names 0)))))
 
@@ -145,7 +112,6 @@
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
   []
-  ;; (l/info "Incrementing append entries call sequence")
   (swap! append-entries-call-sequence inc))
 
 (defn inc-voted-sequence
@@ -181,7 +147,7 @@
 (defn init-term-and-last-voted-for
   "Initialize current term and last voted for values from persistent storage."
   []
-  (l/info "Current term is: " (persistence/get-current-term))
+  (l/debug "Current term is: " (persistence/get-current-term))
   (swap! current-term-and-vote (fn [_]
                                  {:current-term (persistence/get-current-term)
                                   :voted-for (persistence/get-voted-for)})))
@@ -199,7 +165,6 @@
 (defn update-current-term-and-voted-for
   "Synchronously update the current-term and voted-for values and their corresponding persistent state."
   [new-term new-voted-for]
-  ;; (l/info "Update current term and voted for: " new-term new-voted-for)
   (swap! current-term-and-vote (fn [old-info]
                                  (swap-term-and-voted-for-info old-info new-term new-voted-for))))
 
@@ -212,3 +177,35 @@
                                   old-info
                                   (inc (:current-term old-info))
                                   (util/qualified-server-name @this-server)))))
+(defn is-candidate?
+  "Is this server a candidate at this time?"
+  []
+  (= @server-state :candidate))
+
+(defn is-leader?
+  "Is this sever a leader at this time?"
+  []
+  (= @server-state :leader))
+
+(defn is-follower?
+  "Is this server a follower at this time?"
+  []
+  (= @server-state :follower))
+
+(defn become-leader
+  "Become a leader."
+  []
+  (set-server-state :leader)
+  ;; next-index and match-index values must be reinitialized after election
+  (reinit-next-and-match-indices))
+
+(defn become-follower
+  "Become a follower."
+  []
+  (set-server-state :follower))
+
+(defn become-candidate
+  "Become a candidate."
+  []
+  (set-server-state :candidate))
+

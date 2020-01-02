@@ -18,16 +18,14 @@
    :extends
    raft.rpc.RaftRPCGrpc$RaftRPCImplBase))
 
-(defn- count-votes-received
-  "Count the total number of votes received from all responses plus one for self vote."
-  [responses]
-  (inc (count (filter #(some-> %1 :response (.getVoteGranted)) responses))))
+(declare become-a-follower)
+(declare become-a-leader)
 
-(defn- won-election?
-  "Did this server win the election?"
-  [responses]
-  ;; Is total votes in favor > floor(total-number-of-servers/2)
-  (> (count-votes-received responses) (quot (state/get-num-servers) 2)))
+(defn- become-a-follower
+  "Become a follower."
+  [new-term]
+  (state/update-current-term-and-voted-for new-term nil)
+  (state/become-follower))
 
 (defn- term-from-response
   "Get term value from a response."
@@ -43,17 +41,6 @@
     (apply max terms)
     0))
 
-(defn- valid-responses
-  "Filter for valid responses."
-  [responses]
-  (filter some? (map #(:response %1) responses)))
-
-(defn- max-term-response
-  "Max term index from responses. Assume responses are valid and is an array of objects with a
-  .getTerm function implemented."
-  [responses]
-  (reduce #(if (> (.getTerm %1) (.getTerm %2)) %1 %2) responses))
-
 (defn- process-terms-in-responses
   "Process term fields in responses. This is in case one of the other servers
   has a higher current-term. If so, this server must become a follower."
@@ -62,8 +49,7 @@
     (l/trace "Max term from responses: " max-term)
     (when (> max-term (state/get-current-term))
       (l/debug "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
-      (state/update-current-term-and-voted-for max-term nil)
-      (state/become-follower))))
+      (become-a-follower max-term))))
 
 (defn- send-heartbeat-to-servers
   "Send heartbeat requests to other servers."
@@ -80,6 +66,29 @@
   (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
   (state/become-leader)
   (send-heartbeat-to-servers timeout))
+
+(defn- count-votes-received
+  "Count the total number of votes received from all responses plus one for self vote."
+  [responses]
+  (inc (count (filter #(some-> %1 :response (.getVoteGranted)) responses))))
+
+(defn- won-election?
+  "Did this server win the election?"
+  [responses]
+  ;; Is total votes in favor > floor(total-number-of-servers/2)
+  (> (count-votes-received responses) (quot (state/get-num-servers) 2)))
+
+(defn- valid-responses
+  "Filter for valid responses."
+  [responses]
+  (filter some? (map #(:response %1) responses)))
+
+(defn- max-term-response
+  "Max term index from responses. Assume responses are valid and is an array of objects with a
+  .getTerm function implemented."
+  [responses]
+  (reduce #(if (> (.getTerm %1) (.getTerm %2)) %1 %2) responses))
+
 
 (defn- start-new-election
   "Work to do as a candidate."
@@ -168,7 +177,7 @@
     (min (.getLeaderCommitIndex request) (.getLogIndex (last (.getLogEntryList request))))
     prev-commit-index))
 
-(defn- make-response
+(defn- make-append-logs-response
   "Make a response with the given term and success values."
   [term success?]
   (-> (AppendResponse/newBuilder)
@@ -195,9 +204,8 @@
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
 
-  (let [can-append?  (can-append-logs? request)
-        current-term (state/get-current-term)
-        response     (make-response current-term can-append?)]
+  (let [current-term (state/get-current-term)
+        can-append?  (can-append-logs? request)]
     (if can-append?
       (append-log-entries request))
     ;; Additional bookkeeping based on current server state.
@@ -212,7 +220,7 @@
       (l/debug "Got AppendEntries RPC from" (.getCandidateId request) "while current server was a candidate. Becoming a follower..." )
       (state/become-follower))
     ;; Return the response for the request.
-    response))
+    (make-append-logs-response current-term can-append?)))
 
 (defn- make-vote-response
   "Make a VoteResponse"
@@ -263,14 +271,13 @@
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
-  (let [current-term (state/get-current-term)
-        last-voted-for (state/get-voted-for)]
+  (let [current-term (state/get-current-term)]
     (if (> (.getTerm request) current-term)
       (do
         (l/debug "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
         (state/update-current-term-and-voted-for (.getTerm request) nil)
         (state/become-follower)))
-    
+
     (if (should-vote-for-candidate? request)
       (do
         (remember-vote-granted request)
