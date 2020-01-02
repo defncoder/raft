@@ -125,8 +125,8 @@
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
             election-timeout (election/choose-election-timeout)
-            idle-timeout (if (state/is-leader?) 100 election-timeout)
-            grpc-timeout 80]
+            idle-timeout (if (state/is-leader?) 120 election-timeout)
+            grpc-timeout 100]
         ;; Sleep for idle-timeout to see if some other server might send requests.
         (Thread/sleep idle-timeout)
         (l/trace "Woke up from idle timeout of" idle-timeout "milliseconds.")
@@ -212,13 +212,13 @@
     ;; If request term > current term then update current term to the request term and reset
     ;; candidate voted for.
     (when (> (.getTerm request) current-term)
-      (state/update-current-term-and-voted-for (.getTerm request) nil))
+      (become-a-follower (.getTerm request)))
     
     ;; If this server is a candidate in an election AND an AppendEntries RPC
     ;; came in from new leader then convert to a follower.
     (when (state/is-candidate?)
       (l/debug "Got AppendEntries RPC from" (.getCandidateId request) "while current server was a candidate. Becoming a follower..." )
-      (state/become-follower))
+      (become-a-follower (state/get-current-term)))
     ;; Return the response for the request.
     (make-append-logs-response current-term can-append?)))
 
@@ -275,8 +275,7 @@
     (if (> (.getTerm request) current-term)
       (do
         (l/debug "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
-        (state/update-current-term-and-voted-for (.getTerm request) nil)
-        (state/become-follower)))
+        (become-a-follower (.getTerm request))))
 
     (if (should-vote-for-candidate? request)
       (do
