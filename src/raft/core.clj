@@ -54,7 +54,7 @@
         deployment (config/read-deployment-details deployment-file)
         servers (:servers deployment)
         this-server (nth servers (:index options))]
-    (persistence/init-db-connection (util/qualified-server-name this-server))
+    (persistence/init-db-connection this-server)
     (persistence/migrate-db)
     (state/init-term-and-last-voted-for)
     (state/init-with-servers servers this-server)

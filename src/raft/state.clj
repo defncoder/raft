@@ -101,13 +101,13 @@
 
 (defn set-next-index-for-server
   "Set the next log entry index to send to a particular server."
-  [server next-log-index]
-  (set-index-value next-index server next-log-index))
+  [server-info next-log-index]
+  (set-index-value next-index (util/qualified-server-name server-info) next-log-index))
 
 (defn set-match-index-for-server
   "Set the next log entry index to send to a particular server."
-  [server server-match-index]
-  (set-index-value match-index server server-match-index))
+  [server-info server-match-index]
+  (set-index-value match-index (util/qualified-server-name server-info) server-match-index))
 
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
@@ -177,6 +177,7 @@
                                   old-info
                                   (inc (:current-term old-info))
                                   (util/qualified-server-name @this-server)))))
+
 (defn is-candidate?
   "Is this server a candidate at this time?"
   []

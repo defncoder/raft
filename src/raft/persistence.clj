@@ -5,20 +5,21 @@
             [ragtime.repl :as repl]
             [clojure.java.jdbc :as sql]
             [clojure.tools.logging :as l]
-            [raft.migration :as migration])
+            [raft.migration :as migration]
+            [raft.util :as util])
   (:gen-class))
 
 (def system nil)
 
 (defn- make-db-spec
   "Make the map with the component info."
-  [server-name]
-  (assoc (:db-spec config/config) :dbname (str server-name ".db")))
+  [server-info]
+  (assoc (:db-spec config/config) :dbname  (util/db-filename-for-server server-info)))
 
 (defn- start-db-component
   "Start the DB component."
-  [server-name]
-  (let [db-spec (make-db-spec server-name)]
+  [server-info]
+  (let [db-spec (make-db-spec server-info)]
     (component/start (component/system-map
                       :database
                       (database/make-db-connection db-spec)))))
@@ -30,8 +31,8 @@
 
 (defn init-db-connection
   "Initialize DB connection and set up the system component."
-  [server-name]
-  (alter-var-root #'system (fn [_] (start-db-component server-name))))
+  [server-info]
+  (alter-var-root #'system (fn [_] (start-db-component server-info))))
 
 (defn get-current-term
   "Read the current term from persistent storage."

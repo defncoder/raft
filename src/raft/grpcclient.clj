@@ -34,7 +34,7 @@
       ;; (l/info "Channel state for server" (:port server-info) "is"  (-> client (.getChannel) (.getState false)))
       (.withDeadlineAfter client timeout TimeUnit/MILLISECONDS))
     (let [new-client (make-new-grpc-client server-info timeout)]
-      (l/info "Created new client: " new-client)
+      (l/trace "Created new client: " new-client)
       (swap! grpc-clients #(assoc %1 server-info new-client))
       (.withDeadlineAfter new-client timeout TimeUnit/MILLISECONDS))))
 
@@ -147,8 +147,7 @@
     (let [grpc-client (client-for-server server-info timeout)
           response (.requestVote grpc-client vote-request)]
       (if (.getVoteGranted response)
-        (l/info "Received vote from server: " server-info (.getTerm response) (state/get-current-term)))
-      ;; (l/info "Received response. Term: " (.getTerm response) "Vote granted: " (.getVoteGranted response))
+        (l/trace "Received vote from server: " server-info "Term: "(.getTerm response) "Current term: "(state/get-current-term)))
       {:response response})
     (catch StatusRuntimeException e
       (do

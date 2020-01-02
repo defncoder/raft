@@ -24,6 +24,7 @@
 (defn- become-a-follower
   "Become a follower."
   [new-term]
+  (l/debug "Changing state to be a follower...")
   (state/update-current-term-and-voted-for new-term nil)
   (state/become-follower))
 
@@ -48,7 +49,7 @@
   (let [max-term (max-term-from-responses responses)]
     (l/trace "Max term from responses: " max-term)
     (when (> max-term (state/get-current-term))
-      (l/debug "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
+      (l/trace "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
       (become-a-follower max-term))))
 
 (defn- send-heartbeat-to-servers
@@ -60,12 +61,24 @@
       (let [responses (client/make-heartbeat-requests (state/get-other-servers) timeout)]
         (process-terms-in-responses responses)))))
 
+(defn- async-heartbeat-loop
+  "A separate thread to check and send heartbeat requests to other servers whenever
+  this server is the leader."
+  []
+  (async/thread
+    (loop []
+      (when (state/is-leader?)
+        (send-heartbeat-to-servers 100)
+        ;; Sleep for 100 milliseconds.
+        (Thread/sleep 100)
+        (recur)))))
+
 (defn- become-a-leader
   "Become a leader and initiate appropriate activities."
-  [timeout]
+  []
   (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
   (state/become-leader)
-  (send-heartbeat-to-servers timeout))
+  (async-heartbeat-loop))
 
 (defn- count-votes-received
   "Count the total number of votes received from all responses plus one for self vote."
@@ -89,18 +102,17 @@
   [responses]
   (reduce #(if (> (.getTerm %1) (.getTerm %2)) %1 %2) responses))
 
-
 (defn- start-new-election
   "Work to do as a candidate."
   [timeout]
-  (l/debug "Starting new election...")
+  (l/trace "Starting new election...")
   (state/inc-current-term-and-vote-for-self)
   (let [other-servers (state/get-other-servers)
         responses (client/make-vote-requests other-servers timeout)]
     (process-terms-in-responses responses)
     (when (and (state/is-candidate?)
                (won-election? responses))
-      (become-a-leader timeout))))
+      (become-a-leader))))
 
 (defn- got-new-rpc-requests?
   "Did this server get either AppendEntries or VoteRequest RPC requests?"
@@ -108,18 +120,6 @@
   (or
    (not= prev-append-sequence (state/get-append-entries-call-sequence))
    (not= prev-voted-sequence (state/get-voted-sequence))))
-
-(defn- async-heartbeat-loop
-  "A separate thread to check and send heartbeat requests to other servers whenever
-  this server is the leader."
-  []
-  (async/thread
-    (loop []
-      ;; Sleep for 100 milliseconds.
-      (Thread/sleep 100)
-      (if (state/is-leader?)
-        (send-heartbeat-to-servers 100))
-      (recur))))
 
 (defn- async-election-loop
   "Main loop for service."
@@ -145,7 +145,7 @@
       (recur))))
 
 (defn start-raft-service [server-info]
-  (l/info "About to start gRPC service")
+  (l/info "Starting gRPC service...")
   (let [port (:port server-info)
         server-name (util/qualified-server-name server-info)
         raft-service (new raft.grpcservice.RaftRPCImpl)
@@ -160,7 +160,7 @@
                     (if (not (nil? server))
                       (.shutdown server))))))
     (async-election-loop)
-    (async-heartbeat-loop)
+    (l/info "gRPC service started.")
     server))
 
 (defn- can-append-logs?
@@ -208,23 +208,20 @@
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
 
-  (let [current-term (state/get-current-term)
-        can-append?  (can-append-logs? request)]
+  (let [can-append?  (can-append-logs? request)]
     (if can-append?
       (append-log-entries request))
-    ;; Additional bookkeeping based on current server state.
-    ;; If request term > current term then update current term to the request term and reset
-    ;; candidate voted for.
-    (when (> (.getTerm request) current-term)
-      (become-a-follower (.getTerm request)))
+
+    ;; (If request term > current term then update to new term and become a follower.)
+    ;;           OR
+    ;; (If this server is a candidate OR a leader AND an AppendEntries RPC
+    ;; came in from new leader then convert to a follower.)
+    (when (or (> (.getTerm request) (state/get-current-term))
+              (not (state/is-follower?)))
+      (become-a-follower (max (.getTerm request) (state/get-current-term))))
     
-    ;; If this server is a candidate in an election AND an AppendEntries RPC
-    ;; came in from new leader then convert to a follower.
-    (when (state/is-candidate?)
-      (l/debug "Got AppendEntries RPC from" (.getLeaderId request) "while current server was a candidate. Becoming a follower..." )
-      (become-a-follower (state/get-current-term)))
     ;; Return the response for the request.
-    (make-append-logs-response current-term can-append?)))
+    (make-append-logs-response (state/get-current-term) can-append?)))
 
 (defn- make-vote-response
   "Make a VoteResponse"
@@ -275,17 +272,17 @@
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
-  (let [current-term (state/get-current-term)]
-    (if (> (.getTerm request) current-term)
-      (do
-        (l/debug "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) current-term)
-        (become-a-follower (.getTerm request))))
+  (if (> (.getTerm request) (state/get-current-term))
+    (do
+      (l/trace "VoteRequest received with term > current-term. Changing to a follower************" (.getTerm request) (state/get-current-term))
+      (become-a-follower (.getTerm request))))
 
-    (if (should-vote-for-candidate? request)
-      (do
-        (remember-vote-granted request)
-        (make-vote-response current-term true))
-      (make-vote-response current-term false))))
+  (if (should-vote-for-candidate? request)
+    (do
+      (l/trace "Vote granted for request: " request "Current term: " (state/get-current-term))
+      (remember-vote-granted request)
+      (make-vote-response (state/get-current-term) true))
+    (make-vote-response (state/get-current-term) false)))
 
 (defn -appendEntries [this request response]
   (doto response
