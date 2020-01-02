@@ -102,14 +102,6 @@
                (won-election? responses))
       (become-a-leader timeout))))
 
-(defn- become-a-candidate
-  "Operations to do just as this server became a candidate."
-  [timeout]
-  (async/thread
-    (do
-      (state/become-candidate)
-      (start-new-election timeout))))
-
 (defn- got-new-rpc-requests?
   "Did this server get either AppendEntries or VoteRequest RPC requests?"
   [prev-append-sequence prev-voted-sequence]
@@ -117,29 +109,40 @@
    (not= prev-append-sequence (state/get-append-entries-call-sequence))
    (not= prev-voted-sequence (state/get-voted-sequence))))
 
-(defn- service-thread
+(defn- async-heartbeat-loop
+  "A separate thread to check and send heartbeat requests to other servers whenever
+  this server is the leader."
+  []
+  (async/thread
+    (loop []
+      ;; Sleep for 100 milliseconds.
+      (Thread/sleep 100)
+      (if (state/is-leader?)
+        (send-heartbeat-to-servers 100))
+      (recur))))
+
+(defn- async-election-loop
   "Main loop for service."
-  [server-name]
+  []
   (async/thread
     (loop []
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
-            election-timeout (election/choose-election-timeout)
-            idle-timeout (if (state/is-leader?) 120 election-timeout)
-            grpc-timeout 100]
-        ;; Sleep for idle-timeout to see if some other server might send requests.
-        (Thread/sleep idle-timeout)
-        (l/trace "Woke up from idle timeout of" idle-timeout "milliseconds.")
+            election-timeout (election/choose-election-timeout)]
+        ;; Sleep for election-timeout to see if some other server might send requests.
+        (Thread/sleep election-timeout)
+        (l/trace "Woke up from election timeout of" election-timeout "milliseconds.")
 
-        (cond
-          (state/is-leader?) (send-heartbeat-to-servers grpc-timeout)
-          ;; If this server didn't receive new RPC requests that might've
-          ;; changed it to a follower, then become a candidate.
-          ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
-          ;; OR granting vote to a candidate then convert to candidate.
-          (not (got-new-rpc-requests? append-sequence voted-sequence)) (become-a-candidate grpc-timeout))
-
-        (recur)))))
+        ;; If this server didn't receive new RPC requests that might've
+        ;; changed it to a follower, then become a candidate.
+        ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
+        ;; OR granting vote to a candidate then convert to candidate.
+        (when (and (not (state/is-leader?))
+                   (not (got-new-rpc-requests? append-sequence voted-sequence)))
+          (state/become-candidate)
+          (start-new-election 100)))
+      
+      (recur))))
 
 (defn start-raft-service [server-info]
   (l/info "About to start gRPC service")
@@ -156,7 +159,8 @@
                     (l/info "Shutdown hook invoked")
                     (if (not (nil? server))
                       (.shutdown server))))))
-    (service-thread server-name)
+    (async-election-loop)
+    (async-heartbeat-loop)
     server))
 
 (defn- can-append-logs?
@@ -217,7 +221,7 @@
     ;; If this server is a candidate in an election AND an AppendEntries RPC
     ;; came in from new leader then convert to a follower.
     (when (state/is-candidate?)
-      (l/debug "Got AppendEntries RPC from" (.getCandidateId request) "while current server was a candidate. Becoming a follower..." )
+      (l/debug "Got AppendEntries RPC from" (.getLeaderId request) "while current server was a candidate. Becoming a follower..." )
       (become-a-follower (state/get-current-term)))
     ;; Return the response for the request.
     (make-append-logs-response current-term can-append?)))
