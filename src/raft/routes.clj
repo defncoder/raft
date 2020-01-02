@@ -8,6 +8,7 @@
             [ring.middleware.session :refer :all]
             [clojure.tools.logging :as l]
             [cheshire.core :refer :all]
+            [raft.grpcservice :as service]
             ))
 
 (defn- json-response
@@ -21,8 +22,9 @@
   "Create a new visitor object."
   [req]
   (l/info "********************************************************************")
-  (let [req-obj (parse-string (slurp (:body req)))]
-    (json-response (generate-string (assoc req-obj :time "now")))))
+  (let [command (slurp (:body req))]
+    (service/add-new-log-entry command)
+    (json-response "Ok")))
 
 (defroutes app-routes
   (GET "/health/full" [] "Ok")

@@ -35,16 +35,6 @@
     ]
    ])
 
-;; (defn make-test-client-calls
-;;   "docstring"
-;;   [hostname port]
-;;   (l/debug "??????????????????????About to make a client requests...?????????????????")
-;;   (let [values (take 5 (repeatedly #(rand-int 10000)))]
-;;     (doseq [v values]
-;;       (l/info "Sending request with value:" v)
-;;       (client/append-request hostname port v 150)))
-;;   (l/info "Client requests completed."))
-
 (defn -main
   "docstring"
   [& args]

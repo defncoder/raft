@@ -55,7 +55,7 @@
   (sql/execute! (db-connection)
                 ["INSERT OR REPLACE INTO terminfo VALUES (1, (?), (?))" new-term, voted-for]))
 
-(defn add-log-entry
+(defn add-new-log-entry
   "Add a new log entry to the local DB."
   [term command]
   (sql/execute! (db-connection)
@@ -77,11 +77,13 @@
 (defn has-log-at-index-with-term?
   "Check if saved log entries has an entry at index whose term matches input."
   [index term]
-  (-> (sql/query
-       (db-connection)
-       ["select log_index from raftlog where log_index = ? and term = ?" index term])
-      (first)
-      (:log_index false)))
+  (if (and (zero? index) (zero? term))
+    true  ;; When index and term are zero it is the start of the log
+    (-> (sql/query
+         (db-connection)
+         ["select log_index from raftlog where log_index = ? and term = ?" index term])
+        (first)
+        (:log_index false))))
 
 (defn get-term-for-log-index
   "Get the term corresponding to the log entry at the given index. Zero if it doesn't exist."
@@ -113,12 +115,14 @@
   [log-entry]
   [(.getLogIndex log-entry) (.getTerm log-entry) (.getCommand log-entry)])
 
-(defn append-new-log-entries
-  "Append a list of new log entries into the raftlog table."
+(defn add-missing-log-entries
+  "Add only those log entries that are missing from local storage."
   [log-entries]
-  (let [log-values-vec (map #(log-entry-as-vec %1) log-entries)]
-    (sql/execute! (db-connection)
-                  ["INSERT INTO raftlog (log_index, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING" log-values-vec] {:multi? true})))
+  (let [log-values-vec (vec (map #(log-entry-as-vec %1) log-entries))
+        sql-statement ["INSERT INTO raftlog (log_index, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING"]
+        stmt-with-args (vec (concat sql-statement log-values-vec))]
+    ;; (l/debug "Log values vector is: " log-values-vec)
+    (sql/execute! (db-connection) stmt-with-args {:multi? true})))
 
 (defn migrate-db
   "Migrate the database."

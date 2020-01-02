@@ -170,9 +170,26 @@
      an entry at index request.prevLogIndex whose term matches request.prevLogTerm (§5.3).
   See http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf for details."
   [request]
-  (and (not-empty (.getLogEntryList request))
-       (>= (.getTerm request) (state/get-current-term))
-       (persistence/has-log-at-index-with-term? (.getPrevLogIndex request) (.getPrevLogTerm request))))
+
+  (if (not-empty (.getLogEntryList request))
+    (l/debug "Got append entries request with a non-empty logs list."))
+  
+  (cond
+    (empty? (.getLogEntryList request)) false
+    (< (.getTerm request) (state/get-current-term)) (do
+                                                      (l/debug "Non-empty list but request term " (.getTerm request) "is less than current term:" (state/get-current-term))
+                                                      false)
+    (not
+     (persistence/has-log-at-index-with-term?
+      (.getPrevLogIndex request)
+      (.getPrevLogTerm request)))  (do
+                                     (l/debug "Non-empty list but has-log-at-index-with-term? with prevLogIndex:" (.getPrevLogIndex request) "and prevLogTerm: " (.getPrevLogTerm request) "returned false."))
+    :else true)
+  
+  ;; (and (not-empty (.getLogEntryList request))
+  ;;      (>= (.getTerm request) (state/get-current-term))
+  ;;      (persistence/has-log-at-index-with-term? (.getPrevLogIndex request) (.getPrevLogTerm request)))
+  )
 
 (defn- new-commit-index-for-request
   "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry in request)"
@@ -195,11 +212,22 @@
   ;; TODO: See if this can be done using a single delete statement instead of 1 for each log entry in the input.
   (map #(persistence/delete-conflicting-log-entries (.getLogIndex %1) (.getTerm %1)) (.getLogEntryList request)))
 
+(defn propogate-logs
+  "Propogate logs to other servers."
+  []
+  (doall (map #(client/send-logs-to-server %1 100) (state/get-other-servers))))
+
+(defn add-new-log-entry
+  "Add a new log entry to local storage for the current term."
+  [command]
+  (persistence/add-new-log-entry (state/get-current-term) command)
+  (propogate-logs))
+
 (defn- append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
   [request]
   (delete-conflicting-entries-for-request request)
-  (persistence/append-new-log-entries (.getLogEntryList request))
+  (persistence/add-missing-log-entries (.getLogEntryList request))
   (reset! state/commit-index (new-commit-index-for-request request @state/commit-index)))
 
 (defn- handle-append-request
@@ -208,9 +236,16 @@
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
 
-  (let [can-append?  (can-append-logs? request)]
+  (let [has-log-entries? (not-empty (.getLogEntryList request))
+        can-append?  (can-append-logs? request)]
+    (if (> (count (.getLogEntryList request)) 0)
+      (l/debug "Log entries is non-zero..."))
+    
     (if can-append?
       (append-log-entries request))
+
+    (if (and has-log-entries? (not can-append?) )
+      (l/debug "Has log entries but can't append."))
 
     ;; (If request term > current term then update to new term and become a follower.)
     ;;           OR
