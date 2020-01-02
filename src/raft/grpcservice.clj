@@ -238,7 +238,7 @@
   "Are a candidate's log entries up to date?"
   [candidate-last-log-index candidate-last-log-term]
   (if-let [last-log-entry (persistence/get-last-log-entry)]
-    (let [last-log-term (:term_number last-log-entry)
+    (let [last-log-term (:term last-log-entry)
           last-log-index (:log_index last-log-entry)]
       (if (= candidate-last-log-term last-log-term)
         (>= candidate-last-log-index last-log-index)
@@ -293,3 +293,5 @@
   (doto res
     (.onNext (handle-vote-request req))
     (.onCompleted)))
+
+

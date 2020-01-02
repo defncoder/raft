@@ -21,6 +21,13 @@
                  [ragtime "0.8.0"] ;; for migrations
                  ;; JSON
                  [cheshire/cheshire "5.8.0"]
+
+                 ;; REST APIs
+                 [ring "1.7.1"]
+                 [compojure "1.6.1" :exclusions [ring/ring-codec commons-codec]]
+                 [ring/ring-defaults "0.3.2"]
+                 [ring/ring-anti-forgery "1.3.0"]
+
                  ;; general component facility
                  [com.stuartsierra/component "0.4.0"]
                  ;; https://mvnrepository.com/artifact/com.google.protobuf/protobuf-java

@@ -73,10 +73,10 @@
 
 (defn construct-log-entry
   "Create a new LogEntry object."
-  [log-index term-number command]
+  [log-index term command]
   (-> (raft.rpc.LogEntry/newBuilder)
       (.setLogIndex log-index)
-      (.setTermNumber term-number)
+      (.setTerm term)
       (.setCommand command)
       (.build)))
 
@@ -162,3 +162,22 @@
   [servers timeout]
   (let [vote-request (construct-vote-request)]
     (doall (pmap (fn [server-info] (make-vote-request server-info vote-request timeout)) servers))))
+
+(defn send-logs-to-server
+  "Send log entries to server."
+  [server-info]
+  (let [next-index  (state/get-next-index-for-server server-info)
+        log-entries (persistence/get-log-entries next-index 10)
+        prev-log-entry (persistence/get-prev-log-entry next-index)
+        prev-log-index (if prev-log-entry (:log_index prev-log-entry 0) 0)
+        prev-log-term  (if prev-log-entry (:term prev-log-entry 0) 0)
+        data {:leader-term (persistence/get-current-term)
+              :leader-id (state/get-this-server-name)
+              :prev-log-index prev-log-index
+              :prev-log-term prev-log-term
+              :leader-commit-index (state/get-commit-index)
+              :log-entries log-entries}
+        request (construct-append-request data)
+        ]
+    (l/info "Sending this data: " data "To server: " server-info)
+    (l/info "Sending this request: " request "To server: " server-info)))

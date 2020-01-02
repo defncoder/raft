@@ -8,7 +8,11 @@
    [raft.grpcclient :as client]
    [raft.state :as state]
    [raft.util :as util]
-   [raft.config :as config]))
+   [raft.config :as config]
+   [ring.adapter.jetty :as jetty]
+   [clojure.core.async :as async]
+   [raft.routes :as routes]
+   ))
 
 (def cli-options
   ;; An option with a required argument
@@ -58,8 +62,13 @@
     (persistence/migrate-db)
     (state/init-term-and-last-voted-for)
     (state/init-with-servers servers this-server)
-    (l/info "Now listening for gRPC requests on port" (:port this-server))
     (if-let [server (service/start-raft-service this-server)]
       (do
-        ;; (make-test-client-calls (:host this-server) (:port this-server))
+        (async/thread
+          (do
+            (jetty/run-jetty routes/app {
+                                         :ssl? false
+                                         :http? true
+                                         :port (:client-port this-server 11010)
+                                         })))
         (.awaitTermination server)))))

@@ -48,22 +48,21 @@ public final class RaftContainer {
       descriptor;
   static {
     java.lang.String[] descriptorData = {
-      "\n\rraftrpc.proto\022\003rpc\"C\n\010LogEntry\022\021\n\tlog_" +
-      "index\030\001 \001(\003\022\023\n\013term_number\030\002 \001(\003\022\017\n\007comm" +
-      "and\030\003 \001(\t\"\226\001\n\rAppendRequest\022\014\n\004term\030\001 \001(" +
-      "\003\022\020\n\010leaderId\030\002 \001(\t\022\024\n\014prevLogIndex\030\003 \001(" +
-      "\003\022\023\n\013prevLogTerm\030\004 \001(\003\022\031\n\021leaderCommitIn" +
-      "dex\030\005 \001(\003\022\037\n\010logEntry\030\006 \003(\0132\r.rpc.LogEnt" +
-      "ry\"/\n\016AppendResponse\022\014\n\004term\030\001 \001(\003\022\017\n\007su" +
-      "ccess\030\002 \001(\010\"[\n\013VoteRequest\022\014\n\004term\030\001 \001(\003" +
-      "\022\023\n\013candidateId\030\002 \001(\t\022\024\n\014lastLogIndex\030\003 " +
-      "\001(\003\022\023\n\013lastLogTerm\030\004 \001(\003\"1\n\014VoteResponse" +
-      "\022\014\n\004term\030\001 \001(\003\022\023\n\013voteGranted\030\002 \001(\0102{\n\007R" +
-      "aftRPC\022:\n\rAppendEntries\022\022.rpc.AppendRequ" +
-      "est\032\023.rpc.AppendResponse\"\000\0224\n\013RequestVot" +
-      "e\022\020.rpc.VoteRequest\032\021.rpc.VoteResponse\"\000" +
-      "B\"\n\010raft.rpcB\rRaftContainerP\001\242\002\004RRPCb\006pr" +
-      "oto3"
+      "\n\rraftrpc.proto\022\003rpc\"<\n\010LogEntry\022\021\n\tlog_" +
+      "index\030\001 \001(\003\022\014\n\004term\030\002 \001(\003\022\017\n\007command\030\003 \001" +
+      "(\t\"\226\001\n\rAppendRequest\022\014\n\004term\030\001 \001(\003\022\020\n\010le" +
+      "aderId\030\002 \001(\t\022\024\n\014prevLogIndex\030\003 \001(\003\022\023\n\013pr" +
+      "evLogTerm\030\004 \001(\003\022\031\n\021leaderCommitIndex\030\005 \001" +
+      "(\003\022\037\n\010logEntry\030\006 \003(\0132\r.rpc.LogEntry\"/\n\016A" +
+      "ppendResponse\022\014\n\004term\030\001 \001(\003\022\017\n\007success\030\002" +
+      " \001(\010\"[\n\013VoteRequest\022\014\n\004term\030\001 \001(\003\022\023\n\013can" +
+      "didateId\030\002 \001(\t\022\024\n\014lastLogIndex\030\003 \001(\003\022\023\n\013" +
+      "lastLogTerm\030\004 \001(\003\"1\n\014VoteResponse\022\014\n\004ter" +
+      "m\030\001 \001(\003\022\023\n\013voteGranted\030\002 \001(\0102{\n\007RaftRPC\022" +
+      ":\n\rAppendEntries\022\022.rpc.AppendRequest\032\023.r" +
+      "pc.AppendResponse\"\000\0224\n\013RequestVote\022\020.rpc" +
+      ".VoteRequest\032\021.rpc.VoteResponse\"\000B\"\n\010raf" +
+      "t.rpcB\rRaftContainerP\001\242\002\004RRPCb\006proto3"
     };
     com.google.protobuf.Descriptors.FileDescriptor.InternalDescriptorAssigner assigner =
         new com.google.protobuf.Descriptors.FileDescriptor.    InternalDescriptorAssigner() {
@@ -82,7 +81,7 @@ public final class RaftContainer {
     internal_static_rpc_LogEntry_fieldAccessorTable = new
       com.google.protobuf.GeneratedMessageV3.FieldAccessorTable(
         internal_static_rpc_LogEntry_descriptor,
-        new java.lang.String[] { "LogIndex", "TermNumber", "Command", });
+        new java.lang.String[] { "LogIndex", "Term", "Command", });
     internal_static_rpc_AppendRequest_descriptor =
       getDescriptor().getMessageTypes().get(1);
     internal_static_rpc_AppendRequest_fieldAccessorTable = new

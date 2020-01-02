@@ -57,9 +57,14 @@
 
 (defn add-log-entry
   "Add a new log entry to the local DB."
-  [sequence value]
+  [term command]
   (sql/execute! (db-connection)
-                ["INSERT INTO raftlog (sequence, value) VALUES ((?), (?))" sequence, value]))
+                ["INSERT INTO raftlog (log_index, term, command) VALUES ((SELECT count(*) FROM raftlog)+1, (?), (?))" term, command]))
+
+(defn get-log-entries
+  "Get log entries starting from an index and up to limit number of items."
+  [start-index limit]
+  (sql/query (db-connection) ["SELECT * FROM raftlog WHERE log_index >= ? ORDER BY log_index LIMIT ?" start-index limit]))
 
 (defn get-last-log-entry
   "Get the last log entry from persistent storage."
@@ -74,9 +79,26 @@
   [index term]
   (-> (sql/query
        (db-connection)
-       ["select log_index from raftlog where log_index = ? and term_number = ?" index term])
+       ["select log_index from raftlog where log_index = ? and term = ?" index term])
       (first)
       (:log_index false)))
+
+(defn get-term-for-log-index
+  "Get the term corresponding to the log entry at the given index. Zero if it doesn't exist."
+  [log-index]
+  (-> (sql/query
+       (db-connection)
+       ["SELECT term FROM raftlog WHERE log_index=?" log-index])
+      (first)
+      (:term 0)))
+
+(defn get-prev-log-entry
+  "Get the log entry that precedes the log at the given index."
+  [log-index]
+  (-> (sql/query
+       (db-connection)
+       ["SELECT * FROM raftlog WHERE log_index < ? ORDER BY log_index DESC LIMIT 1" log-index])
+      (first)))
 
 (defn delete-conflicting-log-entries
   "If an existing log entry conflicts with a new one(same index but different terms),
@@ -84,19 +106,19 @@
   [new-log-index new-log-term]
   (sql/execute! (db-connection)
                 ["DELETE FROM raftlog where log_index >= 
-                    (SELECT log_index FROM raftlog WHERE log_index = ? AND term_number != ?)" new-log-index new-log-term]))
+                    (SELECT log_index FROM raftlog WHERE log_index = ? AND term != ?)" new-log-index new-log-term]))
 
 (defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
   [log-entry]
-  [(.getLogIndex log-entry) (.getTermNumber log-entry) (.getCommand log-entry)])
+  [(.getLogIndex log-entry) (.getTerm log-entry) (.getCommand log-entry)])
 
 (defn append-new-log-entries
   "Append a list of new log entries into the raftlog table."
   [log-entries]
   (let [log-values-vec (map #(log-entry-as-vec %1) log-entries)]
     (sql/execute! (db-connection)
-                  ["INSERT INTO raftlog (log_index, term_number, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING" log-values-vec] {:multi? true})))
+                  ["INSERT INTO raftlog (log_index, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING" log-values-vec] {:multi? true})))
 
 (defn migrate-db
   "Migrate the database."

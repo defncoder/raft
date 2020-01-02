@@ -21,7 +21,7 @@ private static final long serialVersionUID = 0L;
   }
   private LogEntry() {
     logIndex_ = 0L;
-    termNumber_ = 0L;
+    term_ = 0L;
     command_ = "";
   }
 
@@ -56,7 +56,7 @@ private static final long serialVersionUID = 0L;
           }
           case 16: {
 
-            termNumber_ = input.readInt64();
+            term_ = input.readInt64();
             break;
           }
           case 26: {
@@ -106,13 +106,13 @@ private static final long serialVersionUID = 0L;
     return logIndex_;
   }
 
-  public static final int TERM_NUMBER_FIELD_NUMBER = 2;
-  private long termNumber_;
+  public static final int TERM_FIELD_NUMBER = 2;
+  private long term_;
   /**
-   * <code>int64 term_number = 2;</code>
+   * <code>int64 term = 2;</code>
    */
-  public long getTermNumber() {
-    return termNumber_;
+  public long getTerm() {
+    return term_;
   }
 
   public static final int COMMAND_FIELD_NUMBER = 3;
@@ -166,8 +166,8 @@ private static final long serialVersionUID = 0L;
     if (logIndex_ != 0L) {
       output.writeInt64(1, logIndex_);
     }
-    if (termNumber_ != 0L) {
-      output.writeInt64(2, termNumber_);
+    if (term_ != 0L) {
+      output.writeInt64(2, term_);
     }
     if (!getCommandBytes().isEmpty()) {
       com.google.protobuf.GeneratedMessageV3.writeString(output, 3, command_);
@@ -185,9 +185,9 @@ private static final long serialVersionUID = 0L;
       size += com.google.protobuf.CodedOutputStream
         .computeInt64Size(1, logIndex_);
     }
-    if (termNumber_ != 0L) {
+    if (term_ != 0L) {
       size += com.google.protobuf.CodedOutputStream
-        .computeInt64Size(2, termNumber_);
+        .computeInt64Size(2, term_);
     }
     if (!getCommandBytes().isEmpty()) {
       size += com.google.protobuf.GeneratedMessageV3.computeStringSize(3, command_);
@@ -210,8 +210,8 @@ private static final long serialVersionUID = 0L;
     boolean result = true;
     result = result && (getLogIndex()
         == other.getLogIndex());
-    result = result && (getTermNumber()
-        == other.getTermNumber());
+    result = result && (getTerm()
+        == other.getTerm());
     result = result && getCommand()
         .equals(other.getCommand());
     result = result && unknownFields.equals(other.unknownFields);
@@ -228,9 +228,9 @@ private static final long serialVersionUID = 0L;
     hash = (37 * hash) + LOG_INDEX_FIELD_NUMBER;
     hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
         getLogIndex());
-    hash = (37 * hash) + TERM_NUMBER_FIELD_NUMBER;
+    hash = (37 * hash) + TERM_FIELD_NUMBER;
     hash = (53 * hash) + com.google.protobuf.Internal.hashLong(
-        getTermNumber());
+        getTerm());
     hash = (37 * hash) + COMMAND_FIELD_NUMBER;
     hash = (53 * hash) + getCommand().hashCode();
     hash = (29 * hash) + unknownFields.hashCode();
@@ -372,7 +372,7 @@ private static final long serialVersionUID = 0L;
       super.clear();
       logIndex_ = 0L;
 
-      termNumber_ = 0L;
+      term_ = 0L;
 
       command_ = "";
 
@@ -403,7 +403,7 @@ private static final long serialVersionUID = 0L;
     public raft.rpc.LogEntry buildPartial() {
       raft.rpc.LogEntry result = new raft.rpc.LogEntry(this);
       result.logIndex_ = logIndex_;
-      result.termNumber_ = termNumber_;
+      result.term_ = term_;
       result.command_ = command_;
       onBuilt();
       return result;
@@ -456,8 +456,8 @@ private static final long serialVersionUID = 0L;
       if (other.getLogIndex() != 0L) {
         setLogIndex(other.getLogIndex());
       }
-      if (other.getTermNumber() != 0L) {
-        setTermNumber(other.getTermNumber());
+      if (other.getTerm() != 0L) {
+        setTerm(other.getTerm());
       }
       if (!other.getCommand().isEmpty()) {
         command_ = other.command_;
@@ -518,28 +518,28 @@ private static final long serialVersionUID = 0L;
       return this;
     }
 
-    private long termNumber_ ;
+    private long term_ ;
     /**
-     * <code>int64 term_number = 2;</code>
+     * <code>int64 term = 2;</code>
      */
-    public long getTermNumber() {
-      return termNumber_;
+    public long getTerm() {
+      return term_;
     }
     /**
-     * <code>int64 term_number = 2;</code>
+     * <code>int64 term = 2;</code>
      */
-    public Builder setTermNumber(long value) {
+    public Builder setTerm(long value) {
       
-      termNumber_ = value;
+      term_ = value;
       onChanged();
       return this;
     }
     /**
-     * <code>int64 term_number = 2;</code>
+     * <code>int64 term = 2;</code>
      */
-    public Builder clearTermNumber() {
+    public Builder clearTerm() {
       
-      termNumber_ = 0L;
+      term_ = 0L;
       onChanged();
       return this;
     }

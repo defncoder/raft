@@ -13,9 +13,9 @@ public interface LogEntryOrBuilder extends
   long getLogIndex();
 
   /**
-   * <code>int64 term_number = 2;</code>
+   * <code>int64 term = 2;</code>
    */
-  long getTermNumber();
+  long getTerm();
 
   /**
    * <code>string command = 3;</code>

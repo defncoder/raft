@@ -1,21 +1,26 @@
 {:servers [{
             :host "localhost",
             :port 10010,
+            :client-port 11010,
             }
            {
             :host "localhost",
             :port 10020,
+            :client-port 11020,
             }
            {
             :host "localhost",
             :port 10030,
+            :client-port 11030,
             }
            {
             :host "localhost",
             :port 10040,
+            :client-port 11040,
             }
            {
             :host "localhost",
             :port 10050,
+            :client-port 11050,
             }
            ]}

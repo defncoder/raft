@@ -62,6 +62,11 @@
   [new-state]
   (swap! server-state (fn [_] new-state)))
 
+(defn get-commit-index
+  "Get the commit index for this server."
+  []
+  @commit-index)
+
 (defn get-num-servers
   "Return total number of servers in this cluster."
   []
@@ -104,10 +109,20 @@
   [server-info next-log-index]
   (set-index-value next-index (util/qualified-server-name server-info) next-log-index))
 
+(defn get-next-index-for-server
+  "Get the next-index value for a server."
+  [server-info]
+  (get @next-index (util/qualified-server-name server-info) 0))
+
 (defn set-match-index-for-server
   "Set the next log entry index to send to a particular server."
   [server-info server-match-index]
   (set-index-value match-index (util/qualified-server-name server-info) server-match-index))
+
+(defn get-match-index-for-server
+  "Get the match-index value for a server."
+  [server-info]
+  (get @match-index (util/qualified-server-name server-info) 0))
 
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
