@@ -37,7 +37,6 @@
 (defn get-current-term
   "Read the current term from persistent storage."
   []
-  (l/info "Current term query result is: " (sql/query (db-connection) ["SELECT current_term FROM terminfo WHERE recnum=1"]))
   (-> (sql/query (db-connection) ["SELECT current_term FROM terminfo WHERE recnum=1"])
       (first)
       (:current_term 0)))

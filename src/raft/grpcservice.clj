@@ -211,10 +211,11 @@
   "Get a list of servers whose local storage may be trailing this server."
   []
   (let [last-log-index (persistence/get-last-log-index)]
-    (filter #(> last-log-index (state/get-next-index-for-server %1)) (state/get-other-servers))))
+    (filter #(> last-log-index (state/get-next-index-for-server %1))
+            (state/get-other-servers))))
 
-(defn propogate-logs
-  "Propogate logs to other servers."
+(defn propagate-logs
+  "Propagate logs to other servers."
   []
   (doall (pmap #(client/send-logs-to-server %1 100) (servers-with-trailing-logs))))
 
@@ -222,7 +223,7 @@
   "Add a new log entry to local storage for the current term."
   [command]
   (persistence/add-new-log-entry (state/get-current-term) command)
-  (propogate-logs))
+  (propagate-logs))
 
 (defn- append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"

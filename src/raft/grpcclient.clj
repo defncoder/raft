@@ -66,9 +66,6 @@
   (let [request (raft.rpc.AppendRequest/newBuilder)
         log-entries (doall (map construct-log-entry (:log-entries data)))]
 
-    (if (> (count log-entries) 0)
-      (l/debug "Sending non-empty log entries..."))
-    
     (doto request
       (.setTerm (:leader-term data))
       (.setLeaderId (:leader-id data "localhost"))
@@ -187,7 +184,7 @@
                                              (recur (dec index)))
                                            response-map)
             ;; Successfully sent log entries to server. Try next set of entries, if any.
-            :else (let [next-index (+ index (count log-entries))]
+            :else (let [next-index (+ index (count log-entries) 1)]
                     (state/set-next-index-for-server server-info next-index)
                     (recur next-index))))
         ;; Log entries exhausted. Return a success response.
