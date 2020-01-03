@@ -124,6 +124,13 @@
   [server-info]
   (get @match-index (util/qualified-server-name server-info) 0))
 
+(defn set-indices-for-server
+  "Set next and match indices for server."
+  [server-info index]
+  (let [server-name (util/qualified-server-name server-info)]
+    (set-index-value next-index server-name index)
+    (set-index-value match-index server-name index)))
+
 (defn inc-append-entries-call-sequence
   "Increment the AppendEntries call sequence number."
   []
