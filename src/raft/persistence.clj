@@ -74,6 +74,15 @@
        ["SELECT * FROM raftlog ORDER BY log_index DESC LIMIT 1"])
       (first)))
 
+(defn get-last-log-index
+  "Get the log_index of the last log entry in local storage."
+  []
+  (-> (sql/query
+       (db-connection)
+       ["SELECT log_index FROM raftlog ORDER BY log_index DESC LIMIT 1"])
+      (first)
+      (:log_index 0)))
+
 (defn has-log-at-index-with-term?
   "Check if saved log entries has an entry at index whose term matches input."
   [index term]

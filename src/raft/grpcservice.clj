@@ -198,24 +198,25 @@
     (min (.getLeaderCommitIndex request) (.getLogIndex (last (.getLogEntryList request))))
     prev-commit-index))
 
-(defn- make-append-logs-response
-  "Make a response with the given term and success values."
-  [term success?]
-  (-> (AppendResponse/newBuilder)
-      (.setTerm term)
-      (.setSuccess (true? success?))
-      (.build)))
-
 (defn- delete-conflicting-entries-for-request
   "Delete all existing but conflicting log entries for this request."
   [request]
   ;; TODO: See if this can be done using a single delete statement instead of 1 for each log entry in the input.
-  (map #(persistence/delete-conflicting-log-entries (.getLogIndex %1) (.getTerm %1)) (.getLogEntryList request)))
+  (map #(persistence/delete-conflicting-log-entries
+         (.getLogIndex %1)
+         (.getTerm %1))
+       (.getLogEntryList request)))
+
+(defn- servers-with-trailing-logs
+  "Get a list of servers whose local storage may be trailing this server."
+  []
+  (let [last-log-index (persistence/get-last-log-index)]
+    (filter #(> last-log-index (state/get-next-index-for-server %1)) (state/get-other-servers))))
 
 (defn propogate-logs
   "Propogate logs to other servers."
   []
-  (doall (map #(client/send-logs-to-server %1 100) (state/get-other-servers))))
+  (doall (pmap #(client/send-logs-to-server %1 100) (servers-with-trailing-logs))))
 
 (defn add-new-log-entry
   "Add a new log entry to local storage for the current term."
@@ -256,7 +257,7 @@
       (become-a-follower (max (.getTerm request) (state/get-current-term))))
     
     ;; Return the response for the request.
-    (make-append-logs-response (state/get-current-term) can-append?)))
+    (util/make-append-logs-response (state/get-current-term) can-append?)))
 
 (defn- make-vote-response
   "Make a VoteResponse"

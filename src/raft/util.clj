@@ -1,5 +1,7 @@
 (ns raft.util
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:import
+   [raft.rpc AppendRequest AppendResponse VoteRequest VoteResponse RaftRPCGrpc$RaftRPCImplBase]))
 
 (defn qualified-server-name
   "Make a qualified server name to be used within the service code when referring to a server at a hostname and port."
@@ -19,3 +21,11 @@
   "Get the DB filename to save local persistent info based on server info."
   [server-info]
   (str (:host server-info) "_" (:port server-info) ".db"))
+
+(defn make-append-logs-response
+  "Make a response with the given term and success values."
+  [term success?]
+  (-> (AppendResponse/newBuilder)
+      (.setTerm term)
+      (.setSuccess (true? success?))
+      (.build)))

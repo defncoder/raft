@@ -146,13 +146,10 @@
   (let [vote-request (construct-vote-request)]
     (doall (pmap (fn [server-info] (make-vote-request server-info vote-request timeout)) servers))))
 
-(defn send-logs-to-server
-  "Send log entries to server."
-  [server-info timeout]
-  (let [next-index  (state/get-next-index-for-server server-info)
-        log-entries (persistence/get-log-entries next-index 10)
-        prev-log-entry (persistence/get-prev-log-entry next-index)
-        prev-log-index (if prev-log-entry (:log_index prev-log-entry 0) 0)
+(defn- send-logs-entries-to-server
+  "Send num-entries log entries starting at given index to server."
+  [log-entries prev-log-entry server-info timeout]
+  (let [prev-log-index (if prev-log-entry (:log_index prev-log-entry 0) 0)
         prev-log-term  (if prev-log-entry (:term prev-log-entry 0) 0)
         data {:leader-term (persistence/get-current-term)
               :leader-id (state/get-this-server-name)
@@ -160,11 +157,38 @@
               :prev-log-term prev-log-term
               :leader-commit-index (state/get-commit-index)
               :log-entries log-entries}
-        request (construct-append-request data)
-        ]
+        request (construct-append-request data)]
+    ;; Send data to server and return the response map.
     (l/trace "Sending this data: " data "To server: " server-info)
     (l/debug "Sending " (count log-entries) "records to server: " (util/qualified-server-name server-info))
-    (l/debug "*****************Num log entries is: " (count (.getLogEntryList request)))
-    (let [response (send-append-entries-request server-info request timeout)]
-      (when (:error response)
-        (l/warn "Log entries transmission error: " (:error response))))))
+    (send-append-entries-request server-info request timeout)))
+
+(defn send-logs-to-server
+  "Send log entries to server."
+  [server-info timeout]
+
+  (loop [index (state/get-next-index-for-server server-info)]
+    (let [log-entries (persistence/get-log-entries index 20)] ;; Read up to 20 log entries at a time.
+      (if (not-empty log-entries)
+        (let [prev-log-entry (persistence/get-prev-log-entry index)
+              response-map (send-logs-entries-to-server log-entries prev-log-entry server-info timeout)
+              response (:response response-map)]
+          (cond
+            ;; Encountered an error in sending data to server.
+            (:error response-map) response-map
+            ;; Term on receiving server is > current-term. Current server will become a follower.
+            (> (.getTerm response) (state/get-current-term)) response-map
+            ;; Receiving server couldn't accept log-entries we sent because
+            ;; it would create a gap in its log.
+            ;; If AppendEntries fails because of log inconsistency then decrement nextIndex and retry (§5.3)
+            (not (.getSuccess response)) (if (> index 0)
+                                           (do
+                                             (l/debug "Got a log-inconsistency result. Retrying with previous index.")
+                                             (recur (dec index)))
+                                           response-map)
+            ;; Successfully sent log entries to server. Try next set of entries, if any.
+            :else (let [next-index (+ index (count log-entries))]
+                    (state/set-next-index-for-server server-info next-index)
+                    (recur next-index))))
+        ;; Log entries exhausted. Return a success response.
+        (:response (util/make-append-logs-response (state/get-current-term) true))))))
