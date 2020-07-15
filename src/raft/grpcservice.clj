@@ -310,6 +310,13 @@
   [responses]
   (filter some? (map #(:response %1) responses)))
 
+(defn- num-valid-responses
+  "Get number of valid responses for a collection."
+  [responses]
+  (->> responses
+       (filter :response)
+       (count)))
+
 (defn- max-term-response
   "Max term index from responses. Assume responses are valid and is an array of objects with a
   .getTerm function implemented."
@@ -417,10 +424,26 @@
   (let [last-index (persistence/get-last-log-index)]
     (group-by #(is-server-trailing? %1 last-index) (state/get-other-servers))))
 
+(defn group-servers-by-response
+  "Group servers by whether an error was encountered when communicating with them."
+  [servers responses]
+  (->>
+   (zipmap servers responses)
+   (group-by #(some? (:response (second %1))))))
+
+(defn errored-servers-from-responses
+  "Get a vector of servers that errored out, based on responses."
+  [servers responses]
+  (get (group-servers-by-response servers responses) false []))
+
 (defn- propagate-logs
   "Propagate logs to other servers."
   []
-  (doall (pmap #(send-logs-to-server %1 100) (servers-with-trailing-logs))))
+  (let [servers (state/get-other-servers)
+        responses (doall (pmap #(send-logs-to-server %1 100) servers))
+        errored-servers (errored-servers-from-responses servers responses)]
+    
+    ))
 
 (defn- append-log-entries
   "Append log entries from request based on rules listed in the AppendEntries RPC section of http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"

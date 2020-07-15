@@ -42,6 +42,17 @@
 ;; State of this server: follower OR candidate OR leader
 (def server-state (atom :follower))
 
+(defn majority-number
+  "Number of servers that would make up a majority."
+  []
+  ;; 1 + (quotient num_other_servers/2)
+  (inc (quot @other-servers 2)))
+
+(defn is-majority?
+  "Is this number a majority?"
+  [num]
+  (>= num (majority-number)))
+
 (defn- initial-index-map
   "Make a next-index map for known servers."
   [servers leader-last-log-index]
