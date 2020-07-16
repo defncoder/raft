@@ -2,39 +2,60 @@
   (:require [compojure.core :refer :all]
             [compojure.route :as route]
             [compojure.coercions :refer :all]
-            [ring.util.response :refer [response content-type set-cookie]]
+            [raft.service :as service]
             [ring.middleware.defaults :refer [wrap-defaults site-defaults]]
             [ring.middleware.anti-forgery :refer :all]
+            [ring.middleware.json :as json]
             [ring.middleware.session :refer :all]
             [clojure.tools.logging :as l]
-            [cheshire.core :refer :all]
-            [raft.grpcservice :as service]
-            ))
+            [ring.util.response :as resp]))
 
-(defn- json-response
-  "Return a json response."
-  [body]
-  (->
-   (response body)
-   (content-type "application/json")))
+(defn health-check-handler
+  "Handle health check request."
+  []
+  (l/info "In health check...")
+  (resp/response {:name "Raft consensus service"
+                  :version "1.0.0"
+                  :status "Healthy!"
+                  :clojure-version (clojure-version)}))
 
 (defn add-logentry-handler
   "Create a new visitor object."
   [req]
   (l/info "********************************************************************")
-  (let [command (slurp (:body req))]
-    (service/add-new-log-entry command)
-    (json-response "Ok")))
+  (let [command (:body req)]
+    ;; (service/add-new-log-entry command)
+    (l/info "new log entry: " command)
+    (resp/response {:status "Ok"})))
+
+(defn replicate-handler
+  "Handle a replication request."
+  [req]
+  (let [args (:body req)]
+    (l/trace "Replicate request: " args)
+    (service/handle-append-request args)
+    (resp/response args)))
+
+(defn vote-handler
+  "Handle a request for vote."
+  [req]
+  (let [args (:body req)]
+    (l/trace "Vote request: " args)
+    (resp/response (service/handle-vote-request args))))
 
 (defroutes app-routes
-  (GET "/health/full" [] "Ok")
-  ;; (GET "/cache" [ & query-params ] (get-cached-value-handler (or (:key query-params) "foo")))
-  ;; (GET "/visitors" [ & query-params :as r ] (do
-  ;;                                             (l/info (str "Limit is: " (:limit query-params)))
-  ;;                                             (l/info (str "Request is: " r))
-  ;;                                             (visitors-get-handler query-params)))
-  ;; (GET "/users" [] (users-get-handler 10))
+  (POST "/replicate" req (replicate-handler req))
+  (POST "/vote" req (vote-handler req))
+  (GET "/health/full" [] (health-check-handler))
   (POST "/logs" req (add-logentry-handler req))
-  (route/not-found "Route Not Found"))
+  (route/not-found
+   (do
+     (l/info "Route Not Found")
+     "Route Not Found")))
 
-(def app (wrap-defaults app-routes (assoc-in site-defaults [:security :anti-forgery] false)))
+(def app
+  (->
+   app-routes
+   (json/wrap-json-body {:keywords? true})
+   (json/wrap-json-response {:pretty true})
+   (wrap-defaults (merge site-defaults {:security {:anti-forgery false}}))))

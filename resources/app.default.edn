@@ -8,14 +8,14 @@
                   :ssl? false
                   :http? true
                   ;; :ssl-port 443
-                  :port 7000
+                  :port 12000
                   ;; :key-password "clojure-rocks-emacs"
                   }
  :db-spec {
            :classname "org.sqlite.SQLiteDataSource"
            :subprotocol "sqlite"
-           :directory "/home/easwar/data/raft"
-           ;; :subname "/home/easwar/data/raft/raft1.db"
+           :directory "/Users/pkarivaradasa/data/raft"
+           ;; :subname "/Users/pkarivaradasa/data/raft/raft1.db"
            :user "profileapp"
            :password "clojure-and-emacs-rock"
            }

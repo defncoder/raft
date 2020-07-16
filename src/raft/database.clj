@@ -9,6 +9,7 @@
   [spec]
   (println spec)
   (l/info "DB Spec is: " spec)
+  ;; TODO: Create directory so it's available.
   (let [hds (doto (HikariDataSource.)
               ;; (.setProperty "dataSourceClassName" (:classname spec))
               (.setJdbcUrl (str "jdbc:" (:subprotocol spec) ":" (:directory spec) "/" (:dbname spec)))

@@ -4,15 +4,11 @@
    [clojure.tools.cli :as cli]
    [clojure.tools.logging :as l]
    [raft.persistence :as persistence]
-   [raft.grpcservice :as service]
-   [raft.grpcclient :as client]
    [raft.state :as state]
-   [raft.util :as util]
    [raft.config :as config]
    [ring.adapter.jetty :as jetty]
-   [clojure.core.async :as async]
    [raft.routes :as routes]
-   ))
+   [raft.service :as service]))
 
 (def cli-options
   ;; An option with a required argument
@@ -35,6 +31,11 @@
     ]
    ])
 
+(defn init-application
+  "docstring"
+  []
+  )
+
 (defn -main
   "docstring"
   [& args]
@@ -48,17 +49,21 @@
         deployment (config/read-deployment-details deployment-file)
         servers (:servers deployment)
         this-server (nth servers (:index options))]
+    (l/info "Initializing DB...")
     (persistence/init-db-connection this-server)
+    (l/info "Migrating DB...")
     (persistence/migrate-db)
+    (l/info "Init term and last voted for...")
     (state/init-term-and-last-voted-for)
+    (l/info "Init with servers")
     (state/init-with-servers servers this-server)
-    (if-let [server (service/start-raft-service this-server)]
-      (do
-        (async/thread
-          (do
-            (jetty/run-jetty routes/app {
-                                         :ssl? false
-                                         :http? true
-                                         :port (:client-port this-server 11010)
-                                         })))
-        (.awaitTermination server)))))
+    
+    (let [server-options {:ssl? false
+                          :http? true
+                          :join? false
+                          :port (:port this-server 11010)}
+          server (jetty/run-jetty routes/app server-options)
+          ]
+      (l/info "raft service started on port: " (:port server-options))
+      (service/after-startup-work)
+      (.join server))))

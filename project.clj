@@ -22,51 +22,42 @@
                  ;; JSON
                  [cheshire/cheshire "5.8.0"]
 
-                 ;; REST APIs
+                 ;; ring, ring middleware and compojure
                  [ring "1.7.1"]
-                 [compojure "1.6.1" :exclusions [ring/ring-codec commons-codec]]
                  [ring/ring-defaults "0.3.2"]
                  [ring/ring-anti-forgery "1.3.0"]
+                 [ring/ring-defaults "0.3.2"]
+                 [ring/ring-json "0.5.0"]
+                 [compojure "1.6.1" :exclusions [ring/ring-codec commons-codec]]
+
+                 ;; HTTP client
+                 [clj-http "3.10.1"]
 
                  ;; general component facility
                  [com.stuartsierra/component "0.4.0"]
-                 ;; https://mvnrepository.com/artifact/com.google.protobuf/protobuf-java
-                 [com.google.protobuf/protobuf-java "3.11.1"]
-
-                 [javax.annotation/javax.annotation-api "1.2"]
-                 [io.netty/netty-codec-http2 "4.1.25.Final"]
-                 [io.grpc/grpc-core "1.26.0" :exclusions [io.grpc/grpc-api]]
-                 [io.grpc/grpc-netty "1.26.0"
-                  :exclusions [io.grpc/grpc-core
-                               io.netty/netty-codec-http2]]
-                 [io.grpc/grpc-protobuf "1.26.0"]
-                 [io.grpc/grpc-stub "1.26.0"]
 
                  [org.clojure/tools.cli "0.4.2"]
+                 [org.clojure/core.async "0.6.532"]]
 
-                 [org.clojure/core.async "0.6.532"]
-                 ]
-  :plugins [
+  :plugins [[lein-ring "0.12.5"]
+            [refactor-nrepl "2.5.0"]
             ;; [lein-cloverage "1.0.13"]
             ;; [lein-shell "0.5.0"]
             ;; [lein-ancient "0.6.15"]
             ;; [lein-changelog "0.3.2"]
-            [lein-protoc "0.5.0"]
+            ;; [lein-protoc "0.5.0"]
             ]
 
-  :protoc-version "3.6.0"
-  :proto-source-paths ["resources"]
-  :protoc-grpc {:version "1.26.0"}
-
-  :proto-target-path "src/generated"
-  :java-source-paths ["src/generated"]
+  :ring {:handler raft.routes/app
+         :init customerprofile.handler/init-application}
   
   :main raft.core
   ;; :aot [raft.core raft.resource raft.config raft.state]
   :manifest {"Main-Class" "raft.core"}
   :resource-paths ["resources"]
   :target-path "target/%s"
-  :profiles {:dev {:aot [raft.grpcservice]
+  :profiles {:dev {
+                   ;; :aot [raft.service]
                    :dependencies []}
              :uberjar {:aot :all}}
   :deploy-repositories [["releases" :clojars]]
