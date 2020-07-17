@@ -82,14 +82,14 @@
       (first)
       (:log_index 0)))
 
-(defn has-log-at-index-with-term?
-  "Check if saved log entries has an entry at index whose term matches input."
-  [index term]
+(defn has-log-at-term-and-index?
+  "Check if log has an entry with term and index that match the input."
+  [term index]
   (if (and (zero? index) (zero? term))
     true  ;; When index and term are zero it is the start of the log
     (-> (sql/query
          (db-connection)
-         ["select log_index from raftlog where log_index = ? and term = ?" index term])
+         ["select log_index from raftlog where term = ? and log_index = ?" term index])
         (first)
         (:log_index false))))
 
@@ -121,7 +121,7 @@
 (defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
   [log-entry]
-  [(.getLogIndex log-entry) (.getTerm log-entry) (.getCommand log-entry)])
+  [(:index log-entry) (:term log-entry) (:command log-entry)])
 
 (defn add-missing-log-entries
   "Add only those log entries that are missing from local storage."

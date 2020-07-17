@@ -167,6 +167,11 @@
   []
   (util/qualified-server-name @this-server))
 
+(defn get-current-term-and-voted-for
+  "Get the current term and who this server voted for in that term."
+  []
+  @current-term-and-vote)
+
 (defn get-current-term
   "Get the current term value."
   []
@@ -185,31 +190,36 @@
                                  {:current-term (persistence/get-current-term)
                                   :voted-for (persistence/get-voted-for)})))
 
-(defn- swap-term-and-voted-for-info
-  "Helper to swap current term and voted for info."
+(defn- save-current-term-and-voted-for-info
+  "Save current term and voted for info."
+  [new-info]
+  (persistence/save-current-term-and-voted-for (:current-term new-info) (:voted-for new-info))
+  new-info)
+
+(defn- update-if-newer
+  "Update the term if it's newer."
   [old-info new-term new-voted-for]
-  (if (>= new-term (:current-term old-info 0))
-    (let [new-info {:current-term new-term
-                    :voted-for new-voted-for}]
-      (persistence/save-current-term-and-voted-for new-term new-voted-for)
-      new-info)
+  (if (> new-term (:current-term old-info))
+    (save-current-term-and-voted-for-info {:current-term new-term
+                                           :voted-for new-voted-for})
     old-info))
 
 (defn update-current-term-and-voted-for
   "Synchronously update the current-term and voted-for values and their corresponding persistent state."
   [new-term new-voted-for]
   (swap! current-term-and-vote (fn [old-info]
-                                 (swap-term-and-voted-for-info old-info new-term new-voted-for))))
+                                 (update-if-newer old-info new-term new-voted-for))))
 
 (defn inc-current-term-and-vote-for-self
   "Synchronously increment the current-term and set the voted-for value
-  to the current server and persist this info."
+  to the current server and persist this info.
+  Returns true if able to vote for self. false otherwise."
   []
-  (swap! current-term-and-vote (fn [old-info]
-                                 (swap-term-and-voted-for-info
-                                  old-info
-                                  (inc (:current-term old-info))
-                                  (util/qualified-server-name @this-server)))))
+  (let [self (util/qualified-server-name @this-server)
+        new-term (inc (get-current-term))
+        new-info (swap! current-term-and-vote (fn [old-info]
+                                                (update-if-newer old-info new-term self)))]
+    (= self (:voted-for new-info))))
 
 (defn is-candidate?
   "Is this server a candidate at this time?"

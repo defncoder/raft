@@ -57,13 +57,11 @@
     (state/init-term-and-last-voted-for)
     (l/info "Init with servers")
     (state/init-with-servers servers this-server)
-    
     (let [server-options {:ssl? false
                           :http? true
                           :join? false
                           :port (:port this-server 11010)}
-          server (jetty/run-jetty routes/app server-options)
-          ]
+          server (jetty/run-jetty routes/app server-options)]
       (l/info "raft service started on port: " (:port server-options))
       (service/after-startup-work)
       (.join server))))

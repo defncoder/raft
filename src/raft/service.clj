@@ -12,7 +12,7 @@
 ;;;;; Forward declarations of internal functions.
 (declare become-a-follower become-a-leader propagate-logs async-heartbeat-loop is-response-valid?)
 (declare async-election-loop handle-append-request handle-vote-request can-append-logs? append-log-entries)
-(declare should-vote-for-candidate? remember-vote-granted make-vote-response)
+(declare make-vote-response remember-vote-granted make-server-request url-for-server-endpoint)
 
 ;; total number of active voting requests that are ongoing to various servers
 (def num-active-voting-requests (atom 0))
@@ -20,7 +20,7 @@
 (defn after-startup-work
   "Start the raft service on this machine."
   []
-  ;; (test-request)
+  (become-a-follower 0)
   (async-election-loop))
 
 (defn add-new-log-entry
@@ -32,35 +32,34 @@
 (defn handle-vote-request
   "Handle a VoteRequest message."
   [request]
-  (when (> (:term request) (state/get-current-term))
-    (do
-      (l/trace "VoteRequest received with term > current-term. Changing to a follower************" (:term request) (state/get-current-term))
-      (become-a-follower (:term request))))
-
-  (if (should-vote-for-candidate? request)
-    (do
-      (l/trace "Vote granted for request: " request "Current term: " (state/get-current-term))
-      (remember-vote-granted request)
-      (make-vote-response (state/get-current-term) true))
-    (make-vote-response (state/get-current-term) false)))
+  (let [request-term (:term request)
+        current-term (state/get-current-term)
+        response (make-vote-response request)]
+    (l/trace "Request term: " request-term " Current term: " current-term " Vote granted?: " (:vote-granted response))
+    ;; Remember vote granted in our persistent store.
+    (when (:vote-granted response)
+      (remember-vote-granted request))
+    ;; If this server sees an incoming voting request that has a term > this server's term
+    ;; then this server must become a follower.
+    (when (> request-term current-term)
+      (do
+        (l/trace "Request for vote received with term > current-term. Changing to a follower************" request-term current-term)
+        (become-a-follower request-term)))
+    response))
 
 (defn handle-append-request
   "Handle an AppendEntries request."
   [request]
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-call-sequence)
-
-  (let [has-log-entries? (not-empty (:entries request))
+  (let [log-entries (not-empty (:entries request))
         can-append?  (can-append-logs? request)]
-    (when (> (count (:entries request)) 0)
+    (when log-entries
       (l/debug "Log entries is non-zero..."))
-    
     (when can-append?
       (append-log-entries request))
-
-    (when (and has-log-entries? (not can-append?) )
+    (when (and log-entries (not can-append?))
       (l/debug "Has log entries but can't append."))
-
     ;; (If request term > current term then update to new term and become a follower.)
     ;;           OR
     ;; (If this server is a candidate OR a leader AND an AppendEntries RPC
@@ -68,52 +67,10 @@
     (when (or (> (:term request) (state/get-current-term))
               (not (state/is-follower?)))
       (become-a-follower (max (:term request) (state/get-current-term))))
-    
     ;; Return the response for the request.
-    (util/make-append-logs-response (state/get-current-term) can-append?)))
+    {:term (state/get-current-term) :success (if log-entries can-append? true)}))
 
 ;;;;; Private functions.
-
-(defn- url-for-server-endpoint
-  "Get the base URL for server."
-  [server-info endpoint]
-  (str "http://"
-       (get server-info :host "localhost")
-       (or (and (:port server-info) (str ":" (:port server-info))) "")
-       endpoint))
-
-(defn- json-response
-  "Get json response from a web response."
-  [res]
-  (l/trace "Response body is: " (:body res))
-  (or (->
-       res
-       :body
-       (parse-string true)) {}))
-
-(defn- make-request-map
-  "Make a request body from raw request payload."
-  [payload timeout]
-  {:body (generate-string payload)
-   :content-type :json
-   :socket-timeout timeout
-   :connection-timeout timeout
-   :accept :json})
-
-(defn make-server-request
-  "Make a request to a server endpoint."
-  [server-info endpoint data timeout]
-  (let [url (url-for-server-endpoint server-info endpoint)]
-    (try
-      (l/trace "Request URL is: " url)
-      (->>
-       (make-request-map data timeout)
-       (client/post url)
-       json-response)
-      (catch Exception e (do
-                           (l/trace "Caught exception: " (.getMessage e))
-                           {:error e}))
-      (finally ))))
 
 (defn- send-append-entries-request
   "Make an AppendEntries call to a server and wait up to timeout for a response.
@@ -123,17 +80,11 @@
   (l/trace "Append request URL is: " (url-for-server-endpoint server-info "/replicate"))
   (make-server-request server-info "/replicate" data timeout))
 
-(defn- construct-heartbeat-request
-  "Construct a new heartbeat request. Heartbeat requests are just AppendEntries requests
-  with an empty log entries list."
-  []
-  {:term (state/get-current-term)
-   :leader-id (state/get-this-server-name)})
-
 (defn- send-heartbeat-requests
   "Send a heartbeat request to all other servers."
   [servers timeout]
-  (let [heartbeat-request (construct-heartbeat-request)]
+  (let [heartbeat-request {:term (state/get-current-term)
+                           :leader-id (state/get-this-server-name)}]
     ;; Heartbeat requests are sent out as AppendEntries request with an empty log entries list.
     (doall (pmap (fn [server-info]
                    (send-append-entries-request server-info heartbeat-request timeout)) servers))))
@@ -178,7 +129,6 @@
 (defn- send-logs-to-server
   "Send log entries to server."
   [server-info timeout]
-
   (loop [index (state/get-next-index-for-server server-info)]
     (let [log-entries (persistence/get-log-entries index 20)] ;; Read up to 20 log entries at a time.
       (if (not-empty log-entries)
@@ -202,7 +152,7 @@
                     (state/set-indices-for-server server-info next-index)
                     (recur next-index))))
         ;; Log entries exhausted. Return a success response.
-        (util/make-append-logs-response (state/get-current-term) true)))))
+        {:term (state/get-current-term) :success true}))))
 
 (defn- become-a-follower
   "Become a follower."
@@ -248,13 +198,12 @@
   []
   (async/thread
     (loop []
-      (if (state/is-leader?)
+      (when (state/is-leader?)
         (do
           (send-heartbeat-to-servers 100)
           ;; Sleep for 100 milliseconds.
-          (Thread/sleep 100))
-        (l/trace "Not a leader..."))
-      (recur))))
+          (Thread/sleep 100)
+          (recur))))))
 
 (defn- become-a-leader
   "Become a leader and initiate appropriate activities."
@@ -283,30 +232,17 @@
   [response]
   (not (:error response)))
 
-(defn- num-valid-responses
-  "Get number of valid responses for a collection."
-  [responses]
-  (->> responses
-       (filter is-response-valid?)
-       count))
-
-(defn- max-term-response
-  "Max term index from responses. Assume responses are valid and is an array of objects with a
-  .getTerm function implemented."
-  [responses]
-  (reduce #(if (> (:term %1) (:term %2)) %1 %2) responses))
-
 (defn- start-new-election
   "Work to do as a candidate."
   [timeout]
-  ;; (l/info "Starting new election...")
-  (state/inc-current-term-and-vote-for-self)
-  (let [other-servers (state/get-other-servers)
-        responses (send-vote-requests-to-servers other-servers timeout)]
-    (process-terms-in-responses responses)
-    (when (and (state/is-candidate?)
-               (won-election? responses))
-      (become-a-leader))))
+  (when (state/inc-current-term-and-vote-for-self)
+    (l/debug "Starting new election...")
+    (let [other-servers (state/get-other-servers)
+          responses (send-vote-requests-to-servers other-servers timeout)]
+      (process-terms-in-responses responses)
+      (when (and (state/is-candidate?)
+                 (won-election? responses))
+        (become-a-leader)))))
 
 (defn- got-new-rpc-requests?
   "Did this server get either AppendEntries or VoteRequest RPC requests?"
@@ -326,7 +262,6 @@
         ;; Sleep for election-timeout to see if some other server might send requests.
         (Thread/sleep election-timeout)
         (l/trace "Woke up from election timeout of" election-timeout "milliseconds.")
-
         ;; If this server didn't receive new RPC requests that might've
         ;; changed it to a follower, then become a candidate.
         ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
@@ -344,21 +279,24 @@
      an entry at index request.prevLogIndex whose term matches request.prevLogTerm (§5.3).
   See http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf for details."
   [request]
-
-  (if (not-empty (:entries request))
+  (when (not-empty (:entries request))
     (l/debug "Got append entries request with a non-empty logs list."))
-  
-  (cond
-    (empty? (:entries request)) false
-    (< (:term request) (state/get-current-term)) (do
-                                                   (l/debug "Non-empty list but request term " (:term request) "is less than current term:" (state/get-current-term))
-                                                   false)
-    (not
-     (persistence/has-log-at-index-with-term?
-      (:prev-log-index request)
-      (:prev-log-term request)))  (do
-                                    (l/debug "Non-empty list but has-log-at-index-with-term? with prevLogIndex:" (:prev-log-index request) "and prevLogTerm: " (:prev-log-term request) "returned false."))
-    :else true))
+  (let [request-term (:term request)
+        current-term (state/get-current-term)]
+    (cond
+      (< request-term current-term) (do
+                                      (l/debug "Non-empty list but request term " request-term "is less than current term:" current-term)
+                                      false)
+      (empty? (:entries request)) false
+      (not
+       (persistence/has-log-at-term-and-index?
+        (:prev-log-term request)
+        (:prev-log-index request)))  (do
+                                       (l/debug "Non-empty list but has-log-at-index-with-term? with prevLogIndex:"
+                                                (:prev-log-index request)
+                                                "and prevLogTerm: " (:prev-log-term request) "returned false.")
+                                       false)
+      :else true)))
 
 (defn- new-commit-index-for-request
   "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry in request)"
@@ -422,41 +360,34 @@
   (persistence/add-missing-log-entries (:entries request))
   (reset! state/commit-index (new-commit-index-for-request request @state/commit-index)))
 
-(defn- make-vote-response
-  "Make a VoteResponse"
-  [term vote-granted?]
-  {:term term
-   :vote-granted vote-granted?})
-
 ;; Raft determines which of two logs is more up-to-date by comparing the index and term of the last entries in the logs.
 ;; If the logs have last entries with different terms, then the log with the later term is more up-to-date.
 ;; If the logs end with the same term, then whichever log is longer is more up-to-date.
 (defn- is-candidate-up-to-date?
   "Are a candidate's log entries up to date?"
   [candidate-last-log-index candidate-last-log-term]
-  (if-let [last-log-entry (persistence/get-last-log-entry)]
-    (let [last-log-term (:term last-log-entry)
-          last-log-index (:log_index last-log-entry)]
-      (if (= candidate-last-log-term last-log-term)
-        (>= candidate-last-log-index last-log-index)
-        (> candidate-last-log-term last-log-term)))
-    true))
+  (let [last-log-entry (persistence/get-last-log-entry)
+        last-log-term (:term last-log-entry 0)
+        last-log-index (:log_index last-log-entry 0)]
+    (if (= candidate-last-log-term last-log-term)
+      (>= candidate-last-log-index last-log-index)
+      (> candidate-last-log-term last-log-term))))
 
-(defn- should-vote-for-candidate?
+(defn- make-vote-response
   "Can this server vote for a candidate?"
   [request]
-
   (let [candidate-term (:term request)
         candidate-id (:candidate-id request)
         candidate-last-log-term (:last-log-term request)
         candidate-last-log-index (:last-log-index request)
-        current-term (state/get-current-term)]
+        current-term-and-voted-for (state/get-current-term-and-voted-for)
+        current-term (:current-term current-term-and-voted-for)
+        voted-for (:voted-for current-term-and-voted-for)]
     (l/trace "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
-    (if (< candidate-term current-term)
-      false
-      (let [voted-for (state/get-voted-for)]
-        (and (or (nil? voted-for) (= candidate-id voted-for))
-             (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))))))
+    {:term current-term
+     :vote-granted (and (>= candidate-term current-term)
+                        (or (nil? voted-for) (= candidate-id voted-for))
+                        (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))}))
 
 (defn- remember-vote-granted
   "Bookkeeping mechanism once vote is granted to someone."
@@ -465,3 +396,44 @@
   (l/trace "Updating current term and voted for to: " (:term request) (:candidate-id request))
   (state/update-current-term-and-voted-for (:term request) (:candidate-id request))
   (l/trace "Reading current term and voted for: " (state/get-current-term) (state/get-voted-for)))
+
+(defn- url-for-server-endpoint
+  "Get the base URL for server."
+  [server-info endpoint]
+  (str "http://"
+       (get server-info :host "localhost")
+       (or (and (:port server-info) (str ":" (:port server-info))) "")
+       endpoint))
+
+(defn- json-response
+  "Get json response from a web response."
+  [res]
+  (l/trace "Response body is: " (:body res))
+  (or (->
+       res
+       :body
+       (parse-string true)) {}))
+
+(defn- make-request-map
+  "Make a request body from raw request payload."
+  [payload timeout]
+  {:body (generate-string payload)
+   :content-type :json
+   :socket-timeout timeout
+   :connection-timeout timeout
+   :accept :json})
+
+(defn- make-server-request
+  "Make a request to a server endpoint."
+  [server-info endpoint data timeout]
+  (let [url (url-for-server-endpoint server-info endpoint)]
+    (try
+      (l/trace "Request URL is: " url)
+      (->>
+       (make-request-map data timeout)
+       (client/post url)
+       json-response)
+      (catch Exception e
+        (l/trace "Caught exception: " (.getMessage e))
+        {:error e})
+      (finally ))))

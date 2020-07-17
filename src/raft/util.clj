@@ -20,9 +20,3 @@
   [server-info]
   (str (:host server-info) "_" (:port server-info) ".db"))
 
-(defn make-append-logs-response
-  "Make a response with the given term and success values."
-  [term success?]
-  {:type :AppendResponse
-   :term term
-   :success success?})
