@@ -7,7 +7,6 @@
    [clojure.core.async :as async]
    [raft.persistence :as persistence]
    [raft.state :as state]
-   ;; [raft.election :as election]
    [raft.util :as util]))
 
 ;;;;; Forward declarations of internal functions.
@@ -18,8 +17,14 @@
 
 ;; total number of active voting requests that are ongoing to various servers
 (def num-active-voting-requests (atom 0))
-(def sync-cm (conn-mgr/make-reusable-conn-manager {:timeout 10 :default-per-route 4}))
-(def async-cm (conn-mgr/make-reusable-async-conn-manager {:timeout 10 :default-per-route 4}))
+(def sync-cm nil)
+(def async-cm nil)
+
+(defn before-startup-work
+  "Do any initialization necessary for the service to get it ready to accept connections and do its work."
+  []
+  (alter-var-root #'sync-cm (fn [_] (conn-mgr/make-reusable-conn-manager {:timeout 10 :default-per-route 4})))
+  (alter-var-root #'async-cm (fn [_] (conn-mgr/make-reusable-async-conn-manager {:timeout 10 :default-per-route 4}))))
 
 (defn after-startup-work
   "Start the raft service on this machine."

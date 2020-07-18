@@ -22,7 +22,6 @@
 (defn add-logentry-handler
   "Create a new visitor object."
   [req]
-  (l/info "********************************************************************")
   (let [command (:body req)]
     ;; (service/add-new-log-entry command)
     (l/info "new log entry: " command)
@@ -43,19 +42,19 @@
     (l/trace "Vote request: " args)
     (resp/response (service/handle-vote-request args))))
 
-(defroutes app-routes
-  (POST "/replicate" req (replicate-handler req))
-  (POST "/vote" req (vote-handler req))
-  (GET "/health/full" [] (health-check-handler))
-  (POST "/logs" req (add-logentry-handler req))
-  (route/not-found
-   (do
-     (l/info "Route Not Found")
-     "Route Not Found")))
-
-(def app
+(defn app
+  "The application's route definition for Ring."
+  []
   (->
-   app-routes
+   (defroutes app-routes
+     (POST "/replicate" req (replicate-handler req))
+     (POST "/vote" req (vote-handler req))
+     (GET "/health/full" [] (health-check-handler))
+     (POST "/logs" req (add-logentry-handler req))
+     (route/not-found
+      (do
+        (l/info "Route Not Found")
+        "Route Not Found")))
    (json/wrap-json-body {:keywords? true})
    (json/wrap-json-response {:pretty true})
    (wrap-defaults (merge site-defaults {:security {:anti-forgery false}}))))

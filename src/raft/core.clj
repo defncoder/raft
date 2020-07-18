@@ -1,5 +1,4 @@
 (ns raft.core
-  (:gen-class)
   (:require
    [clojure.tools.cli :as cli]
    [clojure.tools.logging :as l]
@@ -8,9 +7,11 @@
    [raft.config :as config]
    [ring.adapter.jetty :as jetty]
    [raft.routes :as routes]
-   [raft.service :as service]))
+   [raft.service :as service])
+  (:gen-class))
 
-(def cli-options
+(defn cli-options
+  []
   ;; An option with a required argument
   [
    ;; ["-p" "--port PORT" "Port number"
@@ -40,10 +41,10 @@
   "docstring"
   [& args]
   (l/info "Command line args is:" *command-line-args*)
-  (l/info "Parsed args: " (cli/parse-opts args cli-options))
+  (l/info "Parsed args: " (cli/parse-opts args (cli-options)))
   (l/info "Deployment details: " (config/read-deployment-details "deployment.edn"))
 
-  (let [parsed-info (cli/parse-opts args cli-options)
+  (let [parsed-info (cli/parse-opts args (cli-options))
         options (:options parsed-info)
         deployment-file (first (:arguments parsed-info))
         deployment (config/read-deployment-details deployment-file)
@@ -57,11 +58,12 @@
     (state/init-term-and-last-voted-for)
     (l/info "Init with servers")
     (state/init-with-servers servers this-server)
+    (service/before-startup-work)
     (let [server-options {:ssl? false
                           :http? true
                           :join? false
                           :port (:port this-server 11010)}
-          server (jetty/run-jetty routes/app server-options)]
+          server (jetty/run-jetty (routes/app) server-options)]
       (l/info "raft service started on port: " (:port server-options))
       (service/after-startup-work)
       (.join server))))

@@ -1,7 +1,5 @@
 (ns raft.migration
-  (:require [clojure.java.jdbc :as sql]
-            [ragtime.jdbc :as jdbc]
-            [ragtime.core :as rag]
+  (:require [ragtime.jdbc :as jdbc]
             [ragtime.strategy :as strategy]))
 
 (defn migration-config

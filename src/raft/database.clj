@@ -3,11 +3,10 @@
    [clojure.tools.logging :as l]
    [com.stuartsierra.component :as component])
   (:import
-   [com.zaxxer.hikari HikariConfig HikariDataSource]))
+   [com.zaxxer.hikari HikariDataSource]))
 
 (defn hikari-connection-pool
   [spec]
-  (println spec)
   (l/info "DB Spec is: " spec)
   ;; TODO: Create directory so it's available.
   (let [hds (doto (HikariDataSource.)
@@ -28,7 +27,7 @@
   component/Lifecycle
 
   (start [component]
-    (l/info ";; Starting database")
+    (l/info "Starting database...")
     ;; In the 'start' method, initialize this component
     ;; and start it running. For example, connect to a
     ;; database, create thread pools, or initialize shared
@@ -39,7 +38,7 @@
       (assoc component :connection conn-pool)))
 
   (stop [component]
-    (l/info ";; Stopping database")
+    (l/info "Stopping database...")
     ;; In the 'stop' method, shut down the running
     ;; component and release any external resources it has
     ;; acquired.

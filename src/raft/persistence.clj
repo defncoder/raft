@@ -6,15 +6,14 @@
             [clojure.java.jdbc :as sql]
             [clojure.tools.logging :as l]
             [raft.migration :as migration]
-            [raft.util :as util])
-  (:gen-class))
+            [raft.util :as util]))
 
 (def system nil)
 
 (defn- make-db-spec
   "Make the map with the component info."
   [server-info]
-  (assoc (:db-spec config/config) :dbname  (util/db-filename-for-server server-info)))
+  (assoc (:db-spec (config/config)) :dbname  (util/db-filename-for-server server-info)))
 
 (defn- start-db-component
   "Start the DB component."

@@ -10,12 +10,17 @@
                  [org.clojure/tools.logging "0.4.1"]
                  [org.clojure/java.jdbc "0.7.9"]
                  ;; logging
-                 ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-core
-                 [org.apache.logging.log4j/log4j-core "2.13.0"]
-                 ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-api
-                 [org.apache.logging.log4j/log4j-api "2.13.0"]
-                 ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl
-                 [org.apache.logging.log4j/log4j-slf4j-impl "2.13.0"]
+                 [org.slf4j/slf4j-api "1.7.30"]
+                 [ch.qos.logback/logback-core "1.2.3"]
+                 [ch.qos.logback/logback-classic "1.2.3"]
+                 
+                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-core
+                 ;; [org.apache.logging.log4j/log4j-core "2.13.0"]
+                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-api
+                 ;; [org.apache.logging.log4j/log4j-api "2.13.0"]
+                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl
+                 ;; [org.apache.logging.log4j/log4j-slf4j-impl "2.13.0"]
+
                  ;; database
                  [com.zaxxer/HikariCP "3.3.1"] ;; for connection pool
                  [ragtime "0.8.0"] ;; for migrations
@@ -39,8 +44,9 @@
                  [org.clojure/tools.cli "0.4.2"]
                  [org.clojure/core.async "0.6.532"]]
 
-  :plugins [[lein-ring "0.12.5"]
-            [refactor-nrepl "2.5.0"]
+  :plugins [
+            ;; [lein-ring "0.12.5"]
+            ;; [refactor-nrepl "2.5.0"]
             ;; [lein-cloverage "1.0.13"]
             ;; [lein-shell "0.5.0"]
             ;; [lein-ancient "0.6.15"]
@@ -48,18 +54,31 @@
             ;; [lein-protoc "0.5.0"]
             ]
 
-  :ring {:handler raft.routes/app
-         :init customerprofile.handler/init-application}
+  ;; :ring {:handler raft.routes/app
+  ;;        :init customerprofile.handler/init-application}
   
   :main raft.core
   ;; :aot [raft.core raft.resource raft.config raft.state]
   :manifest {"Main-Class" "raft.core"}
   :resource-paths ["resources"]
   :target-path "target/%s"
-  :profiles {:dev {
-                   ;; :aot [raft.service]
-                   :dependencies []}
-             :uberjar {:aot :all}}
+  :profiles {
+             ;; :dev {
+             ;;       ;; :aot [raft.service]
+             ;;       :dependencies []}
+             :repl {
+                    :plugins [
+                              ;; [lein-ring "0.12.5"]
+                              [refactor-nrepl "2.5.0"]
+                              ;; [lein-cloverage "1.0.13"]
+                              ;; [lein-shell "0.5.0"]
+                              ;; [lein-ancient "0.6.15"]
+                              ;; [lein-changelog "0.3.2"]
+                              ;; [lein-protoc "0.5.0"]
+                              ]}
+             :uberjar {:aot :all}
+             ;; :uberjar {:aot [raft.core]}
+             }
   :deploy-repositories [["releases" :clojars]]
   :aliases {"update-readme-version" ["shell" "sed" "-i" "s/\\\\[com\\.dnrtech\\\\/raft \"[0-9.]*\"\\\\]/[com\\.dnrtech\\\\/raft \"${:version}\"]/" "README.md"]}
   :release-tasks [["shell" "git" "diff" "--exit-code"]

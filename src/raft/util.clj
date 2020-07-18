@@ -19,4 +19,3 @@
   "Get the DB filename to save local persistent info based on server info."
   [server-info]
   (str (:host server-info) "_" (:port server-info) ".db"))
-
