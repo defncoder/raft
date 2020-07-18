@@ -1,21 +1,24 @@
 (ns raft.service
   (:require
-   [cheshire.core :refer :all]
+   [cheshire.core :as json]
    [clj-http.client :as client]
+   [clj-http.conn-mgr :as conn-mgr]
    [clojure.tools.logging :as l]
    [clojure.core.async :as async]
    [raft.persistence :as persistence]
    [raft.state :as state]
-   [raft.election :as election]
+   ;; [raft.election :as election]
    [raft.util :as util]))
 
 ;;;;; Forward declarations of internal functions.
 (declare become-a-follower become-a-leader propagate-logs async-heartbeat-loop is-response-valid?)
 (declare async-election-loop handle-append-request handle-vote-request can-append-logs? append-log-entries)
-(declare make-vote-response remember-vote-granted make-server-request url-for-server-endpoint)
+(declare make-vote-response remember-vote-granted make-server-request url-for-server-endpoint make-async-server-request)
 
 ;; total number of active voting requests that are ongoing to various servers
 (def num-active-voting-requests (atom 0))
+(def sync-cm (conn-mgr/make-reusable-conn-manager {:timeout 10 :default-per-route 4}))
+(def async-cm (conn-mgr/make-reusable-async-conn-manager {:timeout 10 :default-per-route 4}))
 
 (defn after-startup-work
   "Start the raft service on this machine."
@@ -103,6 +106,25 @@
   [server-info vote-request timeout]
   (l/trace "Making vote request to: " server-info)
   (make-server-request server-info "/vote" vote-request timeout))
+
+(defn ask-for-votes
+  "Ask other servers for a vote."
+  [servers timeout]
+  (let [vote-request (construct-vote-request)
+        num (count servers)
+        channel (async/chan num)]
+    ;; Issue async requests to other servers.
+    (doseq [s servers]
+      (make-async-server-request s "/vote" vote-request timeout channel))
+
+    ;; Read results from channel
+    (loop [i num
+           result []]
+      (if (= 0 i)
+        (do
+          (async/close! channel)
+          result)
+        (recur (dec i) (conj result (async/<!! channel)))))))
 
 (defn- send-vote-requests-to-servers
   "Send vote requests to a group of servers."
@@ -237,8 +259,11 @@
   [timeout]
   (when (state/inc-current-term-and-vote-for-self)
     (l/debug "Starting new election...")
+    (state/become-candidate)
     (let [other-servers (state/get-other-servers)
-          responses (send-vote-requests-to-servers other-servers timeout)]
+          responses (ask-for-votes other-servers timeout)
+          ;; (send-vote-requests-to-servers other-servers timeout)
+          ]
       (process-terms-in-responses responses)
       (when (and (state/is-candidate?)
                  (won-election? responses))
@@ -251,6 +276,11 @@
    (not= prev-append-sequence (state/get-append-entries-call-sequence))
    (not= prev-voted-sequence (state/get-voted-sequence))))
 
+(defn random-sleep-timeout
+  "Choose a new timeout value for the next election. A random number between 150-300ms."
+  []
+  (+ 150 (rand-int 150)))
+
 (defn- async-election-loop
   "Main loop for service."
   []
@@ -258,17 +288,16 @@
     (loop []
       (let [append-sequence (state/get-append-entries-call-sequence)
             voted-sequence (state/get-voted-sequence)
-            election-timeout (election/choose-election-timeout)]
-        ;; Sleep for election-timeout to see if some other server might send requests.
-        (Thread/sleep election-timeout)
-        (l/trace "Woke up from election timeout of" election-timeout "milliseconds.")
+            timeout (random-sleep-timeout)]
+        ;; Sleep for timeout to see if some other server might send requests.
+        (Thread/sleep timeout)
+        (l/trace "Woke up from election timeout of" timeout "milliseconds.")
         ;; If this server didn't receive new RPC requests that might've
         ;; changed it to a follower, then become a candidate.
         ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
         ;; OR granting vote to a candidate then convert to candidate.
         (when (and (not (state/is-leader?))
                    (not (got-new-rpc-requests? append-sequence voted-sequence)))
-          (state/become-candidate)
           (start-new-election 100)))
       (recur))))
 
@@ -412,16 +441,30 @@
   (or (->
        res
        :body
-       (parse-string true)) {}))
+       (json/parse-string true)) {}))
 
 (defn- make-request-map
   "Make a request body from raw request payload."
-  [payload timeout]
-  {:body (generate-string payload)
+  [payload timeout & [async?]]
+  {:body (json/generate-string payload)
    :content-type :json
    :socket-timeout timeout
    :connection-timeout timeout
-   :accept :json})
+   :accept :json
+   :async? async?
+   :connection-manager (if async? async-cm sync-cm)})
+
+(defn make-async-server-request
+  "Make an async server request and send the result to a channel."
+  [server-info endpoint data timeout c]
+  (let [url (url-for-server-endpoint server-info endpoint)]
+    (l/trace "Request URL is: " url)
+    (client/post url
+                 (make-request-map data timeout true)
+                 (fn [resp]
+                   (l/info "Got response for request...")
+                   (async/go (async/>! c (json-response resp))))
+                 (fn [exception] (async/go (async/>! c {:error exception}))))))
 
 (defn- make-server-request
   "Make a request to a server endpoint."
