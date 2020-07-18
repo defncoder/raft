@@ -14,6 +14,7 @@
 (declare become-a-follower become-a-leader propagate-logs async-heartbeat-loop is-response-valid?)
 (declare async-election-loop handle-append-request handle-vote-request can-append-logs? append-log-entries)
 (declare make-vote-response remember-vote-granted make-server-request url-for-server-endpoint make-async-server-request)
+(declare send-data-to-servers become-a-leader)
 
 ;; total number of active voting requests that are ongoing to various servers
 (def num-active-voting-requests (atom 0))
@@ -75,23 +76,6 @@
 
 ;;;;; Private functions.
 
-(defn- send-append-entries-request
-  "Make an AppendEntries call to a server and wait up to timeout for a response.
-  Returns response map.
-  If an error happened it is returned in a :error key."
-  [server-info data timeout]
-  (l/trace "Append request URL is: " (url-for-server-endpoint server-info "/replicate"))
-  (make-server-request server-info "/replicate" data timeout))
-
-(defn- send-heartbeat-requests
-  "Send a heartbeat request to all other servers."
-  [servers timeout]
-  (let [heartbeat-request {:term (state/get-current-term)
-                           :leader-id (state/get-this-server-name)}]
-    ;; Heartbeat requests are sent out as AppendEntries request with an empty log entries list.
-    (doall (pmap (fn [server-info]
-                   (send-append-entries-request server-info heartbeat-request timeout)) servers))))
-
 (defn- construct-vote-request
   "Construct a vote request message to be sent to all other servers."
   []
@@ -101,36 +85,13 @@
      :last-log-index (:log_index last-log-entry 0)
      :last-log-term (:term last-log-entry 0)}))
 
-(defn- send-vote-request
-  "Make a vote request to a server."
-  [server-info vote-request timeout]
-  (l/trace "Making vote request to: " server-info)
-  (make-server-request server-info "/vote" vote-request timeout))
-
-(defn ask-for-votes
-  "Ask other servers for a vote."
-  [servers timeout]
-  (let [vote-request (construct-vote-request)
-        num (count servers)
-        channel (async/chan num)]
-    ;; Issue async requests to other servers.
-    (doseq [s servers]
-      (make-async-server-request s "/vote" vote-request timeout channel))
-
-    ;; Read results from channel
-    (loop [i num
-           result []]
-      (if (= 0 i)
-        (do
-          (async/close! channel)
-          result)
-        (recur (dec i) (conj result (async/<!! channel)))))))
-
-(defn- send-vote-requests-to-servers
-  "Send vote requests to a group of servers."
-  [servers timeout]
-  (let [vote-request (construct-vote-request)]
-    (doall (pmap (fn [server-info] (send-vote-request server-info vote-request timeout)) servers))))
+(defn- send-append-entries-request
+  "Make an AppendEntries call to a server and wait up to timeout for a response.
+  Returns response map.
+  If an error happened it is returned in a :error key."
+  [server-info data timeout]
+  (l/trace "Append request URL is: " (url-for-server-endpoint server-info "/replicate"))
+  (make-server-request server-info "/replicate" data timeout))
 
 (defn- send-logs-entries-to-server
   "Send num-entries log entries starting at given index to server."
@@ -183,36 +144,31 @@
   (state/update-current-term-and-voted-for new-term nil)
   (state/become-follower))
 
-(defn- term-from-response
-  "Get term value from a response."
+(defn- become-a-leader
+  "Become a leader and initiate appropriate activities."
+  []
+  (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  (state/become-leader)
+  (async-heartbeat-loop))
+
+(defn- process-server-response
+  "Process response to a vote request."
   [response]
-  (or (:term response) 0))
-
-(defn- max-term-from-responses
-  "Get max term from a collection of responses."
-  [responses]
-  (if-let [terms (seq (map term-from-response responses))]
-    (apply max terms)
-    0))
-
-(defn- process-terms-in-responses
-  "Process term fields in responses. This is in case one of the other servers
-  has a higher current-term. If so, this server must become a follower."
-  [responses]
-  (let [max-term (max-term-from-responses responses)]
-    (l/trace "Max term from responses: " max-term)
-    (when (> max-term (state/get-current-term))
-      (l/trace "Response from servers had a higher term than current term. Becoming a follower..." max-term (state/get-current-term))
-      (become-a-follower max-term))))
+  (let [term (:term response 0)]
+    (when (> term (state/get-current-term))
+      (l/trace "Response from servers had a higher term than current term. Becoming a follower..." term (state/get-current-term))
+      (become-a-follower term))))
 
 (defn- send-heartbeat-to-servers
   "Send heartbeat requests to other servers."
   [timeout]
-  (async/thread
-    (do
-      (l/trace "Sending heartbeat requests to other servers...")
-      (let [responses (send-heartbeat-requests (state/get-other-servers) timeout)]
-        (process-terms-in-responses responses)))))
+  (l/trace "Sending heartbeat requests to other servers...")
+  (let [heartbeat-request {:term (state/get-current-term)
+                           :leader-id (state/get-this-server-name)}
+        servers (state/get-other-servers)
+        responses (send-data-to-servers heartbeat-request servers "/replicate" timeout)]
+    ;; Process all heartbeat responses.
+    (doall (map process-server-response responses))))
 
 (defn- async-heartbeat-loop
   "A separate thread to check and send heartbeat requests to other servers whenever
@@ -226,13 +182,6 @@
           ;; Sleep for 100 milliseconds.
           (Thread/sleep 100)
           (recur))))))
-
-(defn- become-a-leader
-  "Become a leader and initiate appropriate activities."
-  []
-  (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-  (state/become-leader)
-  (async-heartbeat-loop))
 
 (defn- count-votes-received
   "Count the total number of votes received from all responses plus one for self vote."
@@ -254,19 +203,20 @@
   [response]
   (not (:error response)))
 
-(defn- start-new-election
+(defn- conduct-a-new-election
   "Work to do as a candidate."
   [timeout]
   (when (state/inc-current-term-and-vote-for-self)
     (l/debug "Starting new election...")
     (state/become-candidate)
     (let [other-servers (state/get-other-servers)
-          responses (ask-for-votes other-servers timeout)
-          ;; (send-vote-requests-to-servers other-servers timeout)
-          ]
-      (process-terms-in-responses responses)
+          vote-request (construct-vote-request)
+          responses (send-data-to-servers vote-request other-servers "/vote" timeout)]
+      ;; Process all vote responses.
+      (doall (map process-server-response responses))
       (when (and (state/is-candidate?)
                  (won-election? responses))
+        ;; !!!
         (become-a-leader)))))
 
 (defn- got-new-rpc-requests?
@@ -298,7 +248,7 @@
         ;; OR granting vote to a candidate then convert to candidate.
         (when (and (not (state/is-leader?))
                    (not (got-new-rpc-requests? append-sequence voted-sequence)))
-          (start-new-election 100)))
+          (conduct-a-new-election 100)))
       (recur))))
 
 (defn- can-append-logs?
@@ -454,6 +404,24 @@
    :async? async?
    :connection-manager (if async? async-cm sync-cm)})
 
+(defn- send-data-to-servers
+  "Send a piece of data to all servers to a specified endpoint.
+  Return a collection of responses from them."
+  [data servers endpoint timeout]
+  (let [num (count servers)
+        channel (async/chan num)]
+    ;; Issue async requests to other servers.
+    (doseq [s servers]
+      (make-async-server-request s endpoint data timeout channel))
+    ;; Read results from channel
+    (loop [i num
+           result []]
+      (if (= 0 i)
+        (do
+          (async/close! channel)
+          result)
+        (recur (dec i) (conj result (async/<!! channel)))))))
+
 (defn make-async-server-request
   "Make an async server request and send the result to a channel."
   [server-info endpoint data timeout c]
@@ -462,9 +430,11 @@
     (client/post url
                  (make-request-map data timeout true)
                  (fn [resp]
-                   (l/info "Got response for request...")
+                   (l/trace "Got response for request...")
                    (async/go (async/>! c (json-response resp))))
-                 (fn [exception] (async/go (async/>! c {:error exception}))))))
+                 (fn [exception]
+                   (l/trace "Exception in network call..." (.getMessage exception))
+                   (async/go (async/>! c {:error exception}))))))
 
 (defn- make-server-request
   "Make a request to a server endpoint."
