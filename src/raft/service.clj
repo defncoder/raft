@@ -13,7 +13,7 @@
 (declare become-a-follower become-a-leader propagate-logs async-heartbeat-loop is-response-valid?)
 (declare async-election-loop handle-append-request handle-vote-request can-append-logs? append-log-entries)
 (declare make-vote-response remember-vote-granted make-server-request url-for-server-endpoint make-async-server-request)
-(declare send-data-to-servers become-a-leader)
+(declare send-data-to-servers become-a-leader is-server-trailing? get-other-up-to-date-servers)
 
 ;; total number of active voting requests that are ongoing to various servers
 (def num-active-voting-requests (atom 0))
@@ -101,8 +101,8 @@
 (defn- send-logs-entries-to-server
   "Send num-entries log entries starting at given index to server."
   [log-entries prev-log-entry server-info timeout]
-  (let [prev-log-index (if prev-log-entry (:log_index prev-log-entry 0) 0)
-        prev-log-term  (if prev-log-entry (:term prev-log-entry 0) 0)
+  (let [prev-log-index (:log_index prev-log-entry 0)
+        prev-log-term  (:term prev-log-entry 0)
         data {:term (persistence/get-current-term)
               :leader-id (state/get-this-server-name)
               :prev-log-index prev-log-index
@@ -116,31 +116,52 @@
 
 (defn- send-logs-to-server
   "Send log entries to server."
-  [server-info timeout]
-  (loop [index (state/get-next-index-for-server server-info)]
-    (let [log-entries (persistence/get-log-entries index 20)] ;; Read up to 20 log entries at a time.
-      (if (not-empty log-entries)
-        (let [prev-log-entry (persistence/get-prev-log-entry index)
+  [server-info timeout channel]
+  (async/thread
+    (loop [index (state/get-next-index-for-server server-info)
+           result {:term (state/get-current-term) :success true}]
+      (if (and (state/is-leader?)
+               (> index 0)
+               (>= (persistence/get-last-log-index) index))
+        ;; Read up to 20 log entries at a time to send to other servers for replication.
+        (let [log-entries (persistence/get-log-entries index 20)
+              prev-log-entry (persistence/get-prev-log-entry index)
               response (send-logs-entries-to-server log-entries prev-log-entry server-info timeout)]
           (cond
             ;; Encountered an error in sending data to server.
-            (:error response) response
-            ;; Term on receiving server is > current-term. Current server will become a follower.
-            (> (:term response) (state/get-current-term)) response
+            (:error response) (do
+                                (l/debug "Error when sending logs to server: " (util/qualified-server-name server-info) " Error is: " (.getMessage (:error response)))
+                                ;; Sleep for a tiny bit.
+                                (Thread/sleep 2)
+                                ;; Retry -- According to the algorithm the leader retries indefinitely.
+                                (recur index response))
+            
+            ;; Term on receiving server is > current-term.
+            ;; The source server/current leader should become a follower. Indicate the result so this server
+            ;; can become a follower right away.
+            ;; NOTE: This case stops the loop and exits this thread.
+            (> (:term response) (state/get-current-term)) (do
+                                                            (l/debug "When replicating logs, received a newer term: "
+                                                                     (:term response)
+                                                                     " from follower: "
+                                                                     (util/qualified-server-name server-info))
+                                                            (async/>!! channel response))
+            
             ;; Receiving server couldn't accept log-entries we sent because
             ;; it would create a gap in its log.
             ;; If AppendEntries fails because of log inconsistency then decrement nextIndex and retry (§5.3)
-            (not (:success response)) (if (> index 0)
-                                        (do
-                                          (l/debug "Got a log-inconsistency result. Retrying with previous index.")
-                                          (recur (dec index)))
-                                        response)
+            (not (:success response)) (do
+                                        (l/debug "Got a log-inconsistency result. Retrying with previous index.")
+                                        (recur (:log_index prev-log-entry 0) response))
+            
             ;; Successfully sent log entries to server. Try next set of entries, if any.
             :else (let [next-index (+ index (count log-entries) 1)]
                     (state/set-indices-for-server server-info next-index)
-                    (recur next-index))))
-        ;; Log entries exhausted. Return a success response.
-        {:term (state/get-current-term) :success true}))))
+                    (recur next-index response))))
+        ;; Log entries exhausted. Post result to channel and exit the loop and this thread.
+        (do
+          (l/debug "Successfully sent logs to: " (util/qualified-server-name server-info))
+          (async/>!! channel result))))))
 
 (defn- become-a-follower
   "Become a follower."
@@ -164,13 +185,18 @@
       (l/trace "Response from servers had a higher term than current term. Becoming a follower..." term (state/get-current-term))
       (become-a-follower term))))
 
+(defn- get-other-up-to-date-servers
+  "Get a list of other servers that are up to date with the current server (which is the leader)."
+  []
+  (filter (complement is-server-trailing?) (state/get-other-servers)))
+
 (defn- send-heartbeat-to-servers
   "Send heartbeat requests to other servers."
   [timeout]
   (l/trace "Sending heartbeat requests to other servers...")
   (let [heartbeat-request {:term (state/get-current-term)
                            :leader-id (state/get-this-server-name)}
-        servers (state/get-other-servers)
+        servers (get-other-up-to-date-servers)
         responses (send-data-to-servers heartbeat-request servers "/replicate" timeout)]
     ;; Process all heartbeat responses.
     (doall (map process-server-response responses))))
@@ -300,8 +326,8 @@
 
 (defn- is-server-trailing?
   "Is a server trailing the current server in logs synced?"
-  [server-info cur-log-index]
-  (>= cur-log-index (state/get-next-index-for-server server-info)))
+  [server-info last-log-index]
+  (>= last-log-index (state/get-next-index-for-server server-info)))
 
 (defn- servers-with-trailing-logs
   "Get a list of servers whose local storage may be trailing this server."
@@ -331,7 +357,7 @@
 (defn- propagate-logs
   "Propagate logs to other servers."
   []
-  (let [servers (state/get-other-servers)
+  (let [servers (servers-with-trailing-logs)
         responses (doall (pmap #(send-logs-to-server %1 100) servers))
         errored-servers (errored-servers-from-responses servers responses)]
     

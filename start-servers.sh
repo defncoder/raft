@@ -1,7 +1,12 @@
 #! /bin/bash
 
-java -jar target/uberjar/raft-0.0.1-standalone.jar -i 0 deployment.edn > log0.txt 2>&1 &
-java -jar target/uberjar/raft-0.0.1-standalone.jar -i 1 deployment.edn > log1.txt 2>&1 &
-java -jar target/uberjar/raft-0.0.1-standalone.jar -i 2 deployment.edn > log2.txt 2>&1 &
-java -jar target/uberjar/raft-0.0.1-standalone.jar -i 3 deployment.edn > log3.txt 2>&1 &
-java -jar target/uberjar/raft-0.0.1-standalone.jar -i 4 deployment.edn > log4.txt 2>&1 &
+./killn.sh 0 > /dev/null 2>&1
+./launchn.sh 0
+./killn.sh 1 > /dev/null 2>&1
+./launchn.sh 1
+./killn.sh 2 > /dev/null 2>&1
+./launchn.sh 2
+./killn.sh 3 > /dev/null 2>&1
+./launchn.sh 3
+./killn.sh 4 > /dev/null 2>&1
+./launchn.sh 4

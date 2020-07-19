@@ -61,7 +61,7 @@
 (defn- server-names
   "Get an array of server names from server deployment info."
   [servers]
-  (map #(util/qualified-server-name %1) servers))
+  (map util/qualified-server-name servers))
 
 (defn- get-server-state
   "Get the current server state."
@@ -99,7 +99,9 @@
   (let [names (server-names @other-servers)
         last-log-entry (persistence/get-last-log-entry)
         last-log-index (if (not-empty last-log-entry) (:log-index last-log-entry 0) 0)]
-    (swap! next-index (fn [_] (initial-index-map names last-log-index)))
+    ;; Initialize next-index array entries to last-log-index+1
+    (swap! next-index (fn [_] (initial-index-map names (inc last-log-index))))
+    ;; Initialize match-index array entries to 0
     (swap! match-index (fn [_] (initial-index-map names 0)))))
 
 (defn init-with-servers
@@ -123,7 +125,7 @@
 (defn get-next-index-for-server
   "Get the next-index value for a server."
   [server-info]
-  (get @next-index (util/qualified-server-name server-info) 0))
+  (get @next-index (util/qualified-server-name server-info) 1))
 
 (defn set-match-index-for-server
   "Set the next log entry index to send to a particular server."
