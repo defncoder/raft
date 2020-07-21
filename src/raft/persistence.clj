@@ -155,7 +155,7 @@
                                log-entries
                                (range next-log-index Integer/MAX_VALUE))]
       (save-log-entries indexed-entries t-conn)
-      [last-log-index next-log-index])))
+      next-log-index)))
 
 (defn migrate-db
   "Migrate the database."

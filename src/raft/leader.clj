@@ -104,7 +104,11 @@
                                 (state/set-next-index-for-server server-info (:prev-log-index data 1)))
     
     ;; Successfully sent log entries to server. Try next set of entries, if any.
-    :else (when (> (count (:entries data)) 0) (state/add-next-index-for-server server-info (count (:entries data))))))
+    :else (do
+            (l/debug "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
+            (when (> (count (:entries data)) 0)
+              (state/add-next-index-for-server server-info (count (:entries data)))
+              (state/set-match-index-for-server server-info (:index (last (:entries data))))))))
 
 (defn- send-log-entries-to-follower
   "Send log entries to a server. Use control-channel to notify caller about completion."
@@ -148,10 +152,25 @@
   (async-heartbeat-loop)
   (synchronize-logs-with-followers))
 
+(defn- update-commit-index
+  "Update commit index based on what log index a majority of servers have."
+  []
+  (let [sorted-match-indices (->
+                              state/get-match-indices
+                              vals
+                              sort)
+        majority-replicated-index (nth sorted-match-indices (- (state/get-num-servers) (state/majority-number)))]
+    (when (> majority-replicated-index state/commit-index)
+      (l/debug "Setting commit-index to: " majority-replicated-index)
+      (state/set-commit-index majority-replicated-index))))
+
 (defn handle-append
   "Handle and append logs request from a client when this server is the leader."
   [request]
-  (persistence/append-new-log-entries-from-client (:log-entries request)
-                                                  (state/get-current-term))
-  (synchronize-logs-with-followers)
-  (:log-entries request))
+  (if-let [log-entries (not-empty (:log-entries request))]
+    (let [log-index (persistence/append-new-log-entries-from-client log-entries
+                                                                    (state/get-current-term))]
+      (synchronize-logs-with-followers)
+      (update-commit-index)
+      (persistence/get-log-entries log-index (count log-entries)))
+    []))

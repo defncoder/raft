@@ -77,6 +77,13 @@
   []
   @commit-index)
 
+(defn set-commit-index
+  "Set the new commit index for this server."
+  [index]
+  (swap! commit-index (fn [old-index] (if (> index old-index)
+                                        index
+                                        old-index))))
+
 (defn get-num-servers
   "Return total number of servers in this cluster."
   []
@@ -148,6 +155,11 @@
   "Get the match-index value for a server."
   [server-info]
   (get @match-index (util/qualified-server-name server-info) 0))
+
+(defn get-match-indices
+  "Get all the match indices."
+  []
+  @match-index)
 
 (defn set-indices-for-server
   "Set next and match indices for server."
