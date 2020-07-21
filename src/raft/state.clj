@@ -127,6 +127,19 @@
   [server-info]
   (get @next-index (util/qualified-server-name server-info) 1))
 
+(defn add-next-index-for-server
+  "Add the given offset to the next index value for a server."
+  [server offset]
+  (->>
+   (get-next-index-for-server server)
+   (+ offset)
+   (set-next-index-for-server server)))
+
+(defn get-next-index-map-for-servers
+  "Get the next index values map for servers."
+  []
+  @next-index)
+
 (defn set-match-index-for-server
   "Set the next log entry index to send to a particular server."
   [server-info server-match-index]

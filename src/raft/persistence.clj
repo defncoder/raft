@@ -36,16 +36,18 @@
 (defn get-current-term
   "Read the current term from persistent storage."
   []
-  (-> (sql/query (db-connection) ["SELECT current_term FROM terminfo WHERE recnum=1"])
-      (first)
-      (:current_term 0)))
+  (sql/with-db-transaction [t-conn (db-connection)]
+    (-> (sql/query t-conn ["SELECT current_term FROM terminfo WHERE recnum=1"])
+        (first)
+        (:current_term 0))))
 
 (defn get-voted-for
   "Get the candidateId of the candidate this server voted for."
   []
-  (-> (sql/query (db-connection) ["SELECT voted_for FROM terminfo WHERE recnum=1"])
-      (first)
-      (:voted_for nil)))
+  (sql/with-db-transaction [t-conn (db-connection)]
+    (-> (sql/query t-conn ["SELECT voted_for FROM terminfo WHERE recnum=1"])
+        (first)
+        (:voted_for nil))))
 
 (defn save-current-term-and-voted-for
   "Conditionally update to new term if it is greater than existing term. If term is udpated, then voted_for is reset to NULL."
@@ -74,9 +76,9 @@
 
 (defn get-last-log-index
   "Get the log_index of the last log entry in local storage."
-  []
+  [ & [t-conn] ]
   (-> (sql/query
-       (db-connection)
+       (or t-conn (db-connection))
        ["SELECT log_index FROM raftlog ORDER BY log_index DESC LIMIT 1"])
       (first)
       (:log_index 0)))
@@ -109,6 +111,12 @@
        ["SELECT * FROM raftlog WHERE log_index < ? ORDER BY log_index DESC LIMIT 1" log-index])
       (first)))
 
+(defn delete-log-entries-beyond-index
+  "Delete all log entries whose index value is strictly greater than the given index value."
+  [index]
+  (sql/execute! (db-connection)
+                ["DELETE FROM raftlog where log_index > ?" index]))
+
 (defn delete-conflicting-log-entries
   "If an existing log entry conflicts with a new one(same index but different terms),
   delete the existing entry and all that follow it. Section §5.3 in http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
@@ -122,14 +130,32 @@
   [log-entry]
   [(:index log-entry) (:term log-entry) (:command log-entry)])
 
-(defn add-missing-log-entries
+(defn save-log-entries
   "Add only those log entries that are missing from local storage."
-  [log-entries]
-  (let [log-values-vec (vec (map #(log-entry-as-vec %1) log-entries))
+  [log-entries & [t-conn]]
+  (let [log-values-vec (vec (map log-entry-as-vec log-entries))
         sql-statement ["INSERT INTO raftlog (log_index, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING"]
         stmt-with-args (vec (concat sql-statement log-values-vec))]
     ;; (l/debug "Log values vector is: " log-values-vec)
-    (sql/execute! (db-connection) stmt-with-args {:multi? true})))
+    (sql/execute! (or t-conn (db-connection)) stmt-with-args {:multi? true})))
+
+(defn append-new-log-entries-from-client
+  "Append log entries from a client. This function will be called ONLY when the current
+  server is the leader.
+  Performs the operation in the scope of a DB transaction so there's no inconsistency because
+  of other DB operations interleaving between when the last-log-index is read vs when the new
+  log entries are appended.
+  Returns the last log index AND the index of the first new log index. This can be used to delete these logs if required."
+  [log-entries current-term]
+  (sql/with-db-transaction [t-conn (db-connection)]
+    (let [last-log-index (get-last-log-index t-conn)
+          next-log-index (inc last-log-index)
+          ;; Set :index for the new log entries to start from next-log-index
+          indexed-entries (map #(assoc %1 :index %2 :term current-term)
+                               log-entries
+                               (range next-log-index Integer/MAX_VALUE))]
+      (save-log-entries indexed-entries t-conn)
+      [last-log-index next-log-index])))
 
 (defn migrate-db
   "Migrate the database."
