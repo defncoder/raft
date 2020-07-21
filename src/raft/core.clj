@@ -2,12 +2,14 @@
   (:require
    [clojure.tools.cli :as cli]
    [clojure.tools.logging :as l]
+   [raft.election :as election]
+   [raft.follower :as follower]
+   [raft.http :as http]
    [raft.persistence :as persistence]
    [raft.state :as state]
    [raft.config :as config]
    [ring.adapter.jetty :as jetty]
-   [raft.routes :as routes]
-   [raft.service :as service])
+   [raft.routes :as routes])
   (:gen-class))
 
 (defn cli-options
@@ -56,14 +58,15 @@
     (persistence/migrate-db)
     (l/info "Init term and last voted for...")
     (state/init-term-and-last-voted-for)
+    (http/init-http)
     (l/info "Init with servers")
     (state/init-with-servers servers this-server)
-    (service/before-startup-work)
     (let [server-options {:ssl? false
                           :http? true
                           :join? false
                           :port (:port this-server 11010)}
           server (jetty/run-jetty (routes/app) server-options)]
       (l/info "raft service started on port: " (:port server-options))
-      (service/after-startup-work)
+      (follower/become-a-follower)
+      (election/async-election-loop)
       (.join server))))

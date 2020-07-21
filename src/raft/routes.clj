@@ -2,7 +2,9 @@
   (:require [compojure.core :refer :all]
             [compojure.route :as route]
             [compojure.coercions :refer :all]
-            [raft.service :as service]
+            [raft.election :as election]
+            [raft.follower :as follower]
+            [raft.leader :as leader]
             [ring.middleware.defaults :refer [wrap-defaults site-defaults]]
             [ring.middleware.anti-forgery :refer :all]
             [ring.middleware.json :as json]
@@ -23,16 +25,18 @@
   "Create a new visitor object."
   [req]
   (let [command (:body req)]
-    ;; (service/add-new-log-entry command)
     (l/info "new log entry: " command)
-    (resp/response {:status "Ok"})))
+    (->>
+     command
+     leader/handle-append
+     resp/response)))
 
 (defn replicate-handler
   "Handle a replication request."
   [req]
   (let [args (:body req)]
     (l/trace "Replicate request: " args)
-    (service/handle-append-request args)
+    (follower/handle-append-request args)
     (resp/response args)))
 
 (defn vote-handler
@@ -40,7 +44,10 @@
   [req]
   (let [args (:body req)]
     (l/trace "Vote request: " args)
-    (resp/response (service/handle-vote-request args))))
+    (->>
+     args
+     election/handle-vote-request
+     resp/response)))
 
 (defn app
   "The application's route definition for Ring."

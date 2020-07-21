@@ -19,3 +19,11 @@
   "Get the DB filename to save local persistent info based on server info."
   [server-info]
   (str (:host server-info) "_" (:port server-info) ".db"))
+
+(defn url-for-server-endpoint
+  "Get the base URL for server."
+  [server-info endpoint]
+  (str "http://"
+       (get server-info :host "localhost")
+       (or (and (:port server-info) (str ":" (:port server-info))) "")
+       endpoint))

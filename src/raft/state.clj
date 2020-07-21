@@ -45,8 +45,7 @@
 (defn majority-number
   "Number of servers that would make up a majority."
   []
-  ;; 1 + (quotient num_other_servers/2)
-  (inc (quot @other-servers 2)))
+  (inc (quot (count @other-servers) 2)))
 
 (defn is-majority?
   "Is this number a majority?"
