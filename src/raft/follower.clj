@@ -34,7 +34,7 @@
   "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry in request)"
   [request prev-commit-index]
   (if (> (:leader-commit request) prev-commit-index)
-    (min (:leader-commit request) (:log-index (last (:entries request))))
+    (min (:leader-commit request) (:idx (last (:entries request))))
     prev-commit-index))
 
 (defn- delete-conflicting-entries-for-request
@@ -42,7 +42,7 @@
   [request]
   ;; TODO: See if this can be done using a single delete statement instead of 1 for each log entry in the input.
   (map #(persistence/delete-conflicting-log-entries
-         (:log-index %1)
+         (:idx %1)
          (:term %1))
        (:entries request)))
 
@@ -52,7 +52,7 @@
   [request]
   (delete-conflicting-entries-for-request request)
   (persistence/save-log-entries (:entries request))
-  (reset! state/commit-index (new-commit-index-for-request request @state/commit-index)))
+  (reset! state/commit-index (new-commit-index-for-request request (state/get-commit-index))))
 
 (defn become-a-follower
   "Become a follower."
@@ -73,7 +73,7 @@
   "Handle an AppendEntries request."
   [request]
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
-  (state/inc-append-entries-call-sequence)
+  (state/inc-append-entries-request-sequence)
   (let [log-entries (not-empty (:entries request))
         can-append?  (can-append-logs? request)]
     (when log-entries

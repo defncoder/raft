@@ -1,5 +1,5 @@
 CREATE TABLE raftdata
 (
-  log_index INTEGER,
+  idx       INTEGER,
   state     BLOB
 );

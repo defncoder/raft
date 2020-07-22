@@ -23,7 +23,7 @@
   "Prepare the heartbeat payload for followers."
   []
   (let [prev-log-entry (persistence/get-last-log-entry)
-        prev-log-index (:log_index prev-log-entry 0)
+        prev-log-index (:idx prev-log-entry 0)
         prev-log-term  (:term prev-log-entry 0)]
     {:term (persistence/get-current-term)
      :leader-id (state/get-this-server-name)
@@ -36,7 +36,7 @@
   [timeout]
   (l/trace "Sending heartbeat requests to other servers...")
   (let [heartbeat-request (prepare-heartbeat-payload)
-        servers (get-other-up-to-date-servers)]
+        servers (state/get-other-servers)]
     (when-let [responses (and (not-empty servers)
                               (http/send-data-to-servers heartbeat-request servers "/replicate" timeout))]
       ;; Process all heartbeat responses. This is done for the side-effect. The return value
@@ -66,7 +66,7 @@
     (let [index (state/get-next-index-for-server server)
           log-entries (persistence/get-log-entries index 20)
           prev-log-entry (persistence/get-prev-log-entry index)
-          prev-log-index (:log_index prev-log-entry 0)
+          prev-log-index (:idx prev-log-entry 0)
           prev-log-term  (:term prev-log-entry 0)]
       {:term (persistence/get-current-term)
        :leader-id (state/get-this-server-name)
@@ -78,6 +78,7 @@
 (defn- process-append-logs-response
   "Process the response from a follower to the append log entries request."
   [server-info data response]
+  (l/trace "Received this response: " response " from server: " (util/qualified-server-name server-info))
   (cond
     ;; Encountered an error in sending data to server.
     (:error response) (do
@@ -108,7 +109,7 @@
             (l/debug "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
             (when (> (count (:entries data)) 0)
               (state/add-next-index-for-server server-info (count (:entries data)))
-              (state/set-match-index-for-server server-info (:index (last (:entries data))))))))
+              (state/set-match-index-for-server server-info (:idx (last (:entries data))))))))
 
 (defn- send-log-entries-to-follower
   "Send log entries to a server. Use control-channel to notify caller about completion."
@@ -121,7 +122,7 @@
           (do
             ;; Send data to server
             (l/trace "Sending this data: " payload "To server: " server)
-            (l/debug "Sending " (count (:entries server)) "records to server: " (util/qualified-server-name server))
+            (l/trace "Sending " (count (:entries payload)) "records to server: " (util/qualified-server-name server))
             (->>
              (http/make-server-request server "/replicate" payload 100)
              (process-append-logs-response server payload))
@@ -156,20 +157,21 @@
   "Update commit index based on what log index a majority of servers have."
   []
   (let [sorted-match-indices (->
-                              state/get-match-indices
+                              (state/get-match-indices)
                               vals
                               sort)
         majority-replicated-index (nth sorted-match-indices (- (state/get-num-servers) (state/majority-number)))]
-    (when (> majority-replicated-index state/commit-index)
+    (when (> majority-replicated-index (state/get-commit-index))
       (l/debug "Setting commit-index to: " majority-replicated-index)
       (state/set-commit-index majority-replicated-index))))
 
 (defn handle-append
   "Handle and append logs request from a client when this server is the leader."
   [request]
-  (if-let [log-entries (not-empty (:log-entries request))]
+  (if-let [log-entries (not-empty (:entries request))]
     (let [log-index (persistence/append-new-log-entries-from-client log-entries
                                                                     (state/get-current-term))]
+      (l/info "Saved the following data to the DB:\n" (persistence/get-log-entries log-index (count log-entries)))
       (synchronize-logs-with-followers)
       (update-commit-index)
       (persistence/get-log-entries log-index (count log-entries)))

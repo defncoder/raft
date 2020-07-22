@@ -14,7 +14,7 @@
   (let [last-log-entry (persistence/get-last-log-entry)]
     {:term (state/get-current-term)
      :candidate-id (state/get-this-server-name)
-     :last-log-index (:log_index last-log-entry 0)
+     :last-log-index (:idx last-log-entry 0)
      :last-log-term (:term last-log-entry 0)}))
 
 (defn- count-votes-received
@@ -48,11 +48,11 @@
         ;; !!!
         (leader/become-a-leader)))))
 
-(defn- got-new-rpc-requests?
-  "Did this server get either AppendEntries or VoteRequest RPC requests?"
-  [prev-append-sequence prev-voted-sequence]
+(defn- got-new-requests-since?
+  "Did this server get log append or vote requests since the last time (based on previous sequence numbers)?"
+  [prev-append-req-sequence prev-voted-sequence]
   (or
-   (not= prev-append-sequence (state/get-append-entries-call-sequence))
+   (not= prev-append-req-sequence (state/get-append-entries-request-sequence))
    (not= prev-voted-sequence (state/get-voted-sequence))))
 
 (defn- random-sleep-timeout
@@ -65,8 +65,8 @@
   []
   (async/thread
     (loop []
-      (let [append-sequence (state/get-append-entries-call-sequence)
-            voted-sequence (state/get-voted-sequence)
+      (let [prev-append-req-sequence (state/get-append-entries-request-sequence)
+            prev-voted-sequence (state/get-voted-sequence)
             timeout (random-sleep-timeout)]
         ;; Sleep for timeout to see if some other server might send requests.
         (Thread/sleep timeout)
@@ -75,8 +75,8 @@
         ;; changed it to a follower, then become a candidate.
         ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
         ;; OR granting vote to a candidate then convert to candidate.
-        (when (and (not (state/is-leader?))
-                   (not (got-new-rpc-requests? append-sequence voted-sequence)))
+        (when (and (state/is-follower?)
+                   (not (got-new-requests-since? prev-append-req-sequence prev-voted-sequence)))
           (conduct-new-election 100)))
       (recur))))
 
@@ -88,7 +88,7 @@
   [candidate-last-log-index candidate-last-log-term]
   (let [last-log-entry (persistence/get-last-log-entry)
         last-log-term (:term last-log-entry 0)
-        last-log-index (:log_index last-log-entry 0)]
+        last-log-index (:idx last-log-entry 0)]
     (if (= candidate-last-log-term last-log-term)
       (>= candidate-last-log-index last-log-index)
       (> candidate-last-log-term last-log-term))))

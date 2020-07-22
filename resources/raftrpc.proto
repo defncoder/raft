@@ -39,7 +39,7 @@ service RaftRPC {
 
 // Specifies a single log entry.
 message LogEntry {
-  int64  log_index = 1;
+  int64  idx = 1;
   int64  term = 2;
   string command = 3;
 }

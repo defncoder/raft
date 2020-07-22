@@ -59,29 +59,29 @@
   "Add a new log entry to the local DB."
   [term command]
   (sql/execute! (db-connection)
-                ["INSERT INTO raftlog (log_index, term, command) VALUES ((SELECT count(*) FROM raftlog)+1, (?), (?))" term, command]))
+                ["INSERT INTO raftlog (idx, term, command) VALUES ((SELECT count(*) FROM raftlog)+1, (?), (?))" term, command]))
 
 (defn get-log-entries
   "Get log entries starting from an index and up to limit number of items."
   [start-index limit]
-  (sql/query (db-connection) ["SELECT * FROM raftlog WHERE log_index >= ? ORDER BY log_index LIMIT ?" start-index limit]))
+  (sql/query (db-connection) ["SELECT * FROM raftlog WHERE idx >= ? ORDER BY idx LIMIT ?" start-index limit]))
 
 (defn get-last-log-entry
   "Get the last log entry from persistent storage."
   []
   (-> (sql/query
        (db-connection)
-       ["SELECT * FROM raftlog ORDER BY log_index DESC LIMIT 1"])
+       ["SELECT * FROM raftlog ORDER BY idx DESC LIMIT 1"])
       (first)))
 
 (defn get-last-log-index
-  "Get the log_index of the last log entry in local storage."
+  "Get the idx of the last log entry in local storage."
   [ & [t-conn] ]
   (-> (sql/query
        (or t-conn (db-connection))
-       ["SELECT log_index FROM raftlog ORDER BY log_index DESC LIMIT 1"])
+       ["SELECT idx FROM raftlog ORDER BY idx DESC LIMIT 1"])
       (first)
-      (:log_index 0)))
+      (:idx 0)))
 
 (defn has-log-at-term-and-index?
   "Check if log has an entry with term and index that match the input."
@@ -90,16 +90,16 @@
     true  ;; When index and term are zero it is the start of the log
     (-> (sql/query
          (db-connection)
-         ["select log_index from raftlog where term = ? and log_index = ?" term index])
+         ["select idx from raftlog where term = ? and idx = ?" term index])
         (first)
-        (:log_index false))))
+        (:idx false))))
 
 (defn get-term-for-log-index
   "Get the term corresponding to the log entry at the given index. Zero if it doesn't exist."
   [log-index]
   (-> (sql/query
        (db-connection)
-       ["SELECT term FROM raftlog WHERE log_index=?" log-index])
+       ["SELECT term FROM raftlog WHERE idx=?" log-index])
       (first)
       (:term 0)))
 
@@ -108,33 +108,33 @@
   [log-index]
   (-> (sql/query
        (db-connection)
-       ["SELECT * FROM raftlog WHERE log_index < ? ORDER BY log_index DESC LIMIT 1" log-index])
+       ["SELECT * FROM raftlog WHERE idx < ? ORDER BY idx DESC LIMIT 1" log-index])
       (first)))
 
 (defn delete-log-entries-beyond-index
   "Delete all log entries whose index value is strictly greater than the given index value."
   [index]
   (sql/execute! (db-connection)
-                ["DELETE FROM raftlog where log_index > ?" index]))
+                ["DELETE FROM raftlog where idx > ?" index]))
 
 (defn delete-conflicting-log-entries
   "If an existing log entry conflicts with a new one(same index but different terms),
   delete the existing entry and all that follow it. Section §5.3 in http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf"
   [new-log-index new-log-term]
   (sql/execute! (db-connection)
-                ["DELETE FROM raftlog where log_index >= 
-                    (SELECT log_index FROM raftlog WHERE log_index = ? AND term != ?)" new-log-index new-log-term]))
+                ["DELETE FROM raftlog where idx >= 
+                    (SELECT idx FROM raftlog WHERE idx = ? AND term != ?)" new-log-index new-log-term]))
 
 (defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
   [log-entry]
-  [(:index log-entry) (:term log-entry) (:command log-entry)])
+  [(:idx log-entry) (:term log-entry) (:command log-entry)])
 
 (defn save-log-entries
   "Add only those log entries that are missing from local storage."
   [log-entries & [t-conn]]
   (let [log-values-vec (vec (map log-entry-as-vec log-entries))
-        sql-statement ["INSERT INTO raftlog (log_index, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING"]
+        sql-statement ["INSERT INTO raftlog (idx, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING"]
         stmt-with-args (vec (concat sql-statement log-values-vec))]
     ;; (l/debug "Log values vector is: " log-values-vec)
     (sql/execute! (or t-conn (db-connection)) stmt-with-args {:multi? true})))
@@ -150,8 +150,8 @@
   (sql/with-db-transaction [t-conn (db-connection)]
     (let [last-log-index (get-last-log-index t-conn)
           next-log-index (inc last-log-index)
-          ;; Set :index for the new log entries to start from next-log-index
-          indexed-entries (map #(assoc %1 :index %2 :term current-term)
+          ;; Set :idx for the new log entries to start from next-log-index
+          indexed-entries (map #(assoc %1 :idx %2 :term current-term)
                                log-entries
                                (range next-log-index Integer/MAX_VALUE))]
       (save-log-entries indexed-entries t-conn)

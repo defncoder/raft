@@ -55,11 +55,11 @@
             ]
 
   ;; :ring {:handler raft.routes/app
-  ;;        :init customerprofile.handler/init-application}
+  ;;        :init  raft.service/startup-services}
   
-  :main raft.core
-  ;; :aot [raft.core raft.resource raft.config raft.state]
-  :manifest {"Main-Class" "raft.core"}
+  :main raft.service
+  ;; :aot [raft.service raft.resource raft.config raft.state]
+  :manifest {"Main-Class" "raft.service"}
   :resource-paths ["resources"]
   :target-path "target/%s"
   :profiles {
@@ -76,9 +76,7 @@
                               ;; [lein-changelog "0.3.2"]
                               ;; [lein-protoc "0.5.0"]
                               ]}
-             :uberjar {:aot :all}
-             ;; :uberjar {:aot [raft.core]}
-             }
+             :uberjar {:aot :all}}
   :deploy-repositories [["releases" :clojars]]
   :aliases {"update-readme-version" ["shell" "sed" "-i" "s/\\\\[com\\.dnrtech\\\\/raft \"[0-9.]*\"\\\\]/[com\\.dnrtech\\\\/raft \"${:version}\"]/" "README.md"]}
   :release-tasks [["shell" "git" "diff" "--exit-code"]

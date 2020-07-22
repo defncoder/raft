@@ -12,7 +12,7 @@
 (def sync-cm nil)
 (def async-cm nil)
 
-(defn init-http
+(defn init-http-client
   "Do connection manager initialization for HTTP clients."
   []
   (alter-var-root #'sync-cm (fn [_] (conn-mgr/make-reusable-conn-manager {:timeout 10 :default-per-route 4})))

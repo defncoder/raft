@@ -15,7 +15,7 @@
 ;; volatile index of AppendEntries call sequence number from current leader.
 ;; Used to detect liveness. If election timeout happens without call from current
 ;; leader OR voting for someone then follower can become a candidate.
-(def append-entries-call-sequence (atom 0))
+(def append-entries-request-sequence (atom 0))
 
 ;; volatile sequence to remember number of times voted so far.
 ;; Used to detect liveness. If election timeout happens without an AppendEntries
@@ -89,10 +89,10 @@
   []
   @num-servers)
 
-(defn get-append-entries-call-sequence
+(defn get-append-entries-request-sequence
   "Get value of AppendEntries call sequence number."
   []
-  @append-entries-call-sequence)
+  @append-entries-request-sequence)
 
 (defn get-voted-sequence
   "Get value of VotedFor sequence."
@@ -104,7 +104,7 @@
   []
   (let [names (server-names @other-servers)
         last-log-entry (persistence/get-last-log-entry)
-        last-log-index (if (not-empty last-log-entry) (:log-index last-log-entry 0) 0)]
+        last-log-index (if (not-empty last-log-entry) (:idx last-log-entry 0) 0)]
     ;; Initialize next-index array entries to last-log-index+1
     (swap! next-index (fn [_] (initial-index-map names (inc last-log-index))))
     ;; Initialize match-index array entries to 0
@@ -168,10 +168,10 @@
     (set-index-value next-index server-name index)
     (set-index-value match-index server-name index)))
 
-(defn inc-append-entries-call-sequence
+(defn inc-append-entries-request-sequence
   "Increment the AppendEntries call sequence number."
   []
-  (swap! append-entries-call-sequence inc))
+  (swap! append-entries-request-sequence inc))
 
 (defn inc-voted-sequence
   "Increment the voted-sequence number."

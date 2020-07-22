@@ -36,8 +36,10 @@
   [req]
   (let [args (:body req)]
     (l/trace "Replicate request: " args)
-    (follower/handle-append-request args)
-    (resp/response args)))
+    (->>
+     args
+     follower/handle-append-request
+     resp/response)))
 
 (defn vote-handler
   "Handle a request for vote."
