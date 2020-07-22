@@ -36,7 +36,7 @@
   "Declare this server to be a candidate and ask for votes 8-:"
   [timeout]
   (when (state/inc-current-term-and-vote-for-self)
-    (l/debug "Starting new election...")
+    (l/trace "Starting new election...")
     (state/become-candidate)
     (let [other-servers (state/get-other-servers)
           vote-request (construct-vote-request)
@@ -75,7 +75,7 @@
         ;; changed it to a follower, then become a candidate.
         ;; If idle timeout elapses without receiving AppendEntriesRPC from current leader
         ;; OR granting vote to a candidate then convert to candidate.
-        (when (and (state/is-follower?)
+        (when (and (not (state/is-leader?))
                    (not (got-new-requests-since? prev-append-req-sequence prev-voted-sequence)))
           (conduct-new-election 100)))
       (recur))))
@@ -89,25 +89,33 @@
   (let [last-log-entry (persistence/get-last-log-entry)
         last-log-term (:term last-log-entry 0)
         last-log-index (:idx last-log-entry 0)]
-    (if (= candidate-last-log-term last-log-term)
-      (>= candidate-last-log-index last-log-index)
-      (> candidate-last-log-term last-log-term))))
+    (or (> candidate-last-log-term last-log-term)
+        (and (= candidate-last-log-term last-log-term) (>= candidate-last-log-index last-log-index)))))
 
 (defn- make-vote-response
   "Can this server vote for a candidate?"
   [request]
-  (let [candidate-term (:term request)
-        candidate-id (:candidate-id request)
+  (let [candidate-id (:candidate-id request)
+        candidate-term (:term request)
         candidate-last-log-term (:last-log-term request)
         candidate-last-log-index (:last-log-index request)
         current-term-and-voted-for (state/get-current-term-and-voted-for)
         current-term (:current-term current-term-and-voted-for)
-        voted-for (:voted-for current-term-and-voted-for)]
-    (l/trace "VoteRequest info: " candidate-term candidate-id candidate-last-log-term candidate-last-log-index current-term)
+        last-voted-for (:voted-for current-term-and-voted-for)
+        candidate-up-to-date? (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term)
+        vote-granted? (and (>= candidate-term current-term)
+                           (or (nil? last-voted-for) (= candidate-id last-voted-for))
+                           candidate-up-to-date?)]
+    (l/trace "Vote request. candidate-id:" candidate-id
+             "last-voted-for:" last-voted-for
+             "candidate-term:" candidate-term
+             "current-term:" current-term
+             "candidate-last-log-term:" candidate-last-log-term
+             "candidate-last-log-index:"
+             candidate-last-log-index)
+    (l/trace "last-voted-for:" last-voted-for ". Is candidate up-to-date?" candidate-up-to-date? ". Vote granted?" vote-granted?)
     {:term current-term
-     :vote-granted (and (>= candidate-term current-term)
-                        (or (nil? voted-for) (= candidate-id voted-for))
-                        (is-candidate-up-to-date? candidate-last-log-index candidate-last-log-term))}))
+     :vote-granted vote-granted?}))
 
 (defn- remember-vote-granted
   "Bookkeeping mechanism once vote is granted to someone."

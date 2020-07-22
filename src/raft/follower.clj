@@ -12,7 +12,7 @@
   See http://nil.csail.mit.edu/6.824/2017/papers/raft-extended.pdf for details."
   [request]
   (when (not-empty (:entries request))
-    (l/debug "Got append entries request with a non-empty logs list."))
+    (l/trace "Got append entries request with a non-empty logs list."))
   (let [request-term (:term request)
         current-term (state/get-current-term)]
     (cond
@@ -76,8 +76,6 @@
   (state/inc-append-entries-request-sequence)
   (let [log-entries (not-empty (:entries request))
         can-append?  (can-append-logs? request)]
-    (when log-entries
-      (l/debug "Log entries is non-zero..."))
     (when can-append?
       (append-log-entries request))
     (when (and log-entries (not can-append?))
