@@ -66,7 +66,7 @@
   [response]
   (let [term (:term response 0)]
     (when (> term (state/get-current-term))
-      (l/trace "Response from servers had a higher term than current term. Becoming a follower..." term (state/get-current-term))
+      (l/debug "Response from servers had a higher term than current term. Becoming a follower..." term (state/get-current-term))
       (become-a-follower term))))
 
 (defn handle-append-request
@@ -74,6 +74,8 @@
   [request]
   ;; Increment the sequence that's maintained for the number of times an AppendRequest call is seen.
   (state/inc-append-entries-request-sequence)
+  ;; Remember current leader. Will be useful to redirect client requests to this server.
+  (state/set-current-leader (:leader-id request))
   (let [log-entries (not-empty (:entries request))
         can-append?  (can-append-logs? request)]
     (when can-append?

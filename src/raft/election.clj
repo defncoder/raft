@@ -36,7 +36,7 @@
   "Declare this server to be a candidate and ask for votes 8-:"
   [timeout]
   (when (state/inc-current-term-and-vote-for-self)
-    (l/trace "Starting new election...")
+    (l/debug "Starting new election...")
     (state/become-candidate)
     (let [other-servers (state/get-other-servers)
           vote-request (construct-vote-request)

@@ -5,6 +5,7 @@
             [raft.election :as election]
             [raft.follower :as follower]
             [raft.leader :as leader]
+            [raft.state :as state]
             [ring.middleware.defaults :refer [wrap-defaults site-defaults]]
             [ring.middleware.anti-forgery :refer :all]
             [ring.middleware.json :as json]
@@ -24,12 +25,16 @@
 (defn add-logentry-handler
   "Create a new visitor object."
   [req]
-  (let [command (:body req)]
-    (l/info "new log entry from client: " command)
-    (->>
-     command
-     leader/handle-append
-     resp/response)))
+  (if (state/is-leader?)
+    (let [command (:body req)]
+      (l/info "new log entry from client: " command)
+      (->>
+       command
+       leader/handle-append
+       resp/response))
+    (let [leader-url (str "http://" (state/get-current-leader) "/logs")]
+      (l/info "Redirecting to leader:" leader-url)
+      (resp/redirect leader-url :temporary-redirect))))
 
 (defn replicate-handler
   "Handle a replication request."

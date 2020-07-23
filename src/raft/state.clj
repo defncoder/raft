@@ -42,6 +42,10 @@
 ;; State of this server: follower OR candidate OR leader
 (def server-state (atom :follower))
 
+;; Current leader's qualified name. Only valid when current server is a follower
+;; AND if the current leader has sent at least one heartbeat message successfully.
+(def current-leader-name (atom ""))
+
 (defn majority-number
   "Number of servers that would make up a majority."
   []
@@ -70,7 +74,7 @@
 (defn- set-server-state
   "Change server state."
   [new-state]
-  (swap! server-state (fn [_] new-state)))
+  (reset! server-state new-state ))
 
 (defn get-commit-index
   "Get the commit index for this server."
@@ -99,6 +103,16 @@
   []
   @voted-sequence)
 
+(defn inc-append-entries-request-sequence
+  "Increment the AppendEntries call sequence number."
+  []
+  (swap! append-entries-request-sequence inc))
+
+(defn inc-voted-sequence
+  "Increment the voted-sequence number."
+  []
+  (swap! voted-sequence inc))
+
 (defn reinit-next-and-match-indices
   "Reinitialize relevant state after an election."
   []
@@ -113,9 +127,9 @@
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."
   [servers current-server]
-  (swap! num-servers (fn [_] (count servers)))
-  (swap! this-server (fn [_] current-server))
-  (swap! other-servers (fn [_] (filterv #(not= current-server %1) servers)))
+  (reset! num-servers (count servers))
+  (reset! this-server current-server)
+  (reset! other-servers (filterv #(not= current-server %1) servers))
   (reinit-next-and-match-indices))
 
 (defn- set-index-value
@@ -167,16 +181,6 @@
   (let [server-name (util/qualified-server-name server-info)]
     (set-index-value next-index server-name index)
     (set-index-value match-index server-name index)))
-
-(defn inc-append-entries-request-sequence
-  "Increment the AppendEntries call sequence number."
-  []
-  (swap! append-entries-request-sequence inc))
-
-(defn inc-voted-sequence
-  "Increment the voted-sequence number."
-  []
-  (swap! voted-sequence inc))
 
 (defn get-other-servers
   "Get a list of other servers info."
@@ -279,3 +283,12 @@
   []
   (set-server-state :candidate))
 
+(defn get-current-leader
+  "Get the fully qualified name of the current leader."
+  []
+  @current-leader-name)
+
+(defn set-current-leader
+  "Set the fully qualified name of the current leader."
+  [leader]
+  (reset! current-leader-name leader))

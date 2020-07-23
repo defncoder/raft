@@ -36,12 +36,11 @@
   [timeout]
   (l/trace "Sending heartbeat requests to other servers...")
   (let [heartbeat-request (prepare-heartbeat-payload)
-        servers (state/get-other-servers)]
-    (when-let [responses (and (not-empty servers)
-                              (http/send-data-to-servers heartbeat-request servers "/replicate" timeout))]
-      ;; Process all heartbeat responses. This is done for the side-effect. The return value
-      ;; from this function is not relevant.
-      (doall (map follower/process-server-response responses)))))
+        servers (get-other-up-to-date-servers)]
+    ;; Process all heartbeat responses. This is done for the side-effect. The return value
+    ;; from this function is not relevant.
+    (doseq [server servers]
+      (http/make-async-server-request server "/replicate" heartbeat-request timeout #(follower/process-server-response %)))))
 
 (defn- async-heartbeat-loop
   "A separate thread to check and send heartbeat requests to other servers whenever
@@ -53,7 +52,7 @@
         (do
           (send-heartbeat-to-servers 100)
           ;; Sleep for 100 milliseconds.
-          (Thread/sleep 100)
+          (async/<!! (async/timeout 100))
           (recur))))))
 
 (defn- prepare-append-payload-for-follower
@@ -82,9 +81,10 @@
   (cond
     ;; Encountered an error in sending data to server.
     (:error response) (do
-                        (l/trace "Error when sending logs to server: " (util/qualified-server-name server-info) " Error is: " (.getMessage (:error response)))
-                        ;; Sleep for a tiny bit.
-                        (Thread/sleep 2))
+                        (l/debug "Error when sending logs to server: " (util/qualified-server-name server-info) " Error is: " (.getMessage (:error response)))
+                        ;; Encountered an error when trying to make a network call to the server.
+                        (async/<!! (async/timeout 100))
+                        (l/debug "Woke up from error sleep..."))
     
     ;; Term on receiving server is > current-term.
     ;; The source server/current leader should become a follower. Indicate the result so this server
@@ -95,21 +95,24 @@
                                                              (:term response)
                                                              " from follower: "
                                                              (util/qualified-server-name server-info))
-                                                    (follower/become-a-follower (:term response)))
+                                                    (follower/become-a-follower (:term response))
+                                                    true)
 
     ;; Receiving server couldn't accept log-entries we sent because
     ;; it would create a gap in its log.
     ;; If AppendEntries fails because of log inconsistency then decrement nextIndex and retry (§5.3)
     (not (:success response)) (do
                                 (l/debug "Got a log-inconsistency result. Retrying with previous index.")
-                                (state/set-next-index-for-server server-info (:prev-log-index data 1)))
+                                (state/set-next-index-for-server server-info (:prev-log-index data 1))
+                                true)
     
     ;; Successfully sent log entries to server. Try next set of entries, if any.
     :else (do
-            (l/debug "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
+            (l/trace "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
             (when (> (count (:entries data)) 0)
               (state/add-next-index-for-server server-info (count (:entries data)))
-              (state/set-match-index-for-server server-info (:idx (last (:entries data))))))))
+              (state/set-match-index-for-server server-info (:idx (last (:entries data)))))
+            true)))
 
 (defn- send-log-entries-to-follower
   "Send log entries to a server. Use control-channel to notify caller about completion."
@@ -122,10 +125,9 @@
           (do
             ;; Send data to server
             (l/trace "Sending this data: " payload "To server: " server)
-            (l/trace "Sending " (count (:entries payload)) "records to server: " (util/qualified-server-name server))
-            (->>
-             (http/make-server-request server "/replicate" payload 100)
-             (process-append-logs-response server payload))
+            (l/debug "Sending " (count (:entries payload)) "records to server: " (util/qualified-server-name server))
+            (let [response (first (http/send-data-to-servers payload [server] "/replicate" 100))]
+              (process-append-logs-response server payload response))
             (recur)))))))
 
 (defn- synchronize-logs-with-followers
@@ -143,6 +145,7 @@
       (when (and (state/is-leader?)
                  (< (inc (count (get-other-up-to-date-servers))) (state/majority-number)))
         (recur)))
+    (l/debug "Closing sync logs channel...")
     (async/close! control-channel)))
 
 (defn become-a-leader
