@@ -150,10 +150,8 @@
 (defn add-next-index-for-server
   "Add the given offset to the next index value for a server."
   [server offset]
-  (->>
-   (get-next-index-for-server server)
-   (+ offset)
-   (set-next-index-for-server server)))
+  (let [server-name (util/qualified-server-name server)]
+    (swap! next-index #(assoc %1 server-name (+ offset (get %1 server-name 1))))))
 
 (defn get-next-index-map-for-servers
   "Get the next index values map for servers."
