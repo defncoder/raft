@@ -27,7 +27,7 @@
   [req]
   (if (state/is-leader?)
     (let [command (:body req)]
-      (l/info "new log entry from client: " command)
+      (l/trace "new log entry from client: " command)
       (->>
        command
        leader/handle-append

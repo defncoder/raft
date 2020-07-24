@@ -217,7 +217,7 @@
   (if-let [log-entries (not-empty (:entries request))]
     (let [log-index (persistence/append-new-log-entries-from-client log-entries
                                                                     (state/get-current-term))]
-      (l/info "Saved the following data to the DB:\n" (persistence/get-log-entries log-index (count log-entries)))
+      (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries log-index (count log-entries)))
       (async/>!! request-channel-for-sync true)
       (async/<!! response-channel-for-sync)
       (update-commit-index)
