@@ -2,9 +2,11 @@
   (:require [compojure.core :refer :all]
             [compojure.route :as route]
             [compojure.coercions :refer :all]
+            [clj-http.util :as http-util]
             [raft.election :as election]
             [raft.follower :as follower]
             [raft.leader :as leader]
+            [raft.persistence :as persistence]
             [raft.state :as state]
             [ring.middleware.defaults :refer [wrap-defaults site-defaults]]
             [ring.middleware.anti-forgery :refer :all]
@@ -12,6 +14,11 @@
             [ring.middleware.session :refer :all]
             [clojure.tools.logging :as l]
             [ring.util.response :as resp]))
+
+(defn- make-test-payload
+  "docstring"
+  [start n]
+  {:entries (mapv #(assoc {} :command (str "Command " %)) (range start (+ start n)))})
 
 (defn health-check-handler
   "Handle health check request."
@@ -33,6 +40,20 @@
        leader/handle-append
        resp/response))
     (let [leader-url (str "http://" (state/get-current-leader) "/logs")]
+      (l/info "Redirecting to leader:" leader-url)
+      (resp/redirect leader-url :temporary-redirect))))
+
+(defn add-test-logs-handler
+  "Generate some test log entries to try out the functionality."
+  [num-logs]
+  (if (state/is-leader?)
+    (do
+      (l/trace "Adding new test log entries.")
+      (->>
+       (make-test-payload (:idx (persistence/get-last-log-entry) 1) num-logs)
+       leader/handle-append
+       resp/response))
+    (let [leader-url (str "http://" (state/get-current-leader) "/test-logs?num-logs=" num-logs)]
       (l/info "Redirecting to leader:" leader-url)
       (resp/redirect leader-url :temporary-redirect))))
 
@@ -61,10 +82,14 @@
   []
   (->
    (defroutes app-routes
-     (POST "/replicate" req (replicate-handler req))
      (POST "/vote" req (vote-handler req))
-     (GET "/health/full" [] (health-check-handler))
+     (POST "/replicate" req (replicate-handler req))
      (POST "/logs" req (add-logentry-handler req))
+     (GET "/test-logs" req
+          (do
+            (l/trace "test-logs request is:" req)
+            (add-test-logs-handler (Integer. (get (:query-params req) "num-logs" "100")))))
+     (GET "/health/full" [] (health-check-handler))
      (route/not-found
       (do
         (l/info "Route Not Found")

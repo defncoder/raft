@@ -78,8 +78,3 @@
   (l/trace "Deployment details: " (config/read-deployment-details "deployment.edn"))
   (startup-services (cli/parse-opts args (cli-options))))
 
-(defn make-test-payload
-  "docstring"
-  [start n]
-  {:entries (mapv #(assoc {} :command (str "Command " %)) (range start (+ start n)))})
-
