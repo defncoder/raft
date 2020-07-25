@@ -100,13 +100,13 @@
     ;; it would create a gap in its log.
     ;; If AppendEntries fails because of log inconsistency then decrement nextIndex and retry (§5.3)
     (not (:success response)) (do
-                                (l/debug "Got a log-inconsistency result. Retrying with previous index.")
+                                (l/trace "Got a log-inconsistency result. Retrying with previous index.")
                                 (state/set-next-index-for-server server-info (:prev-log-index data 1))
                                 true)
     
     ;; Successfully sent log entries to server. Try next set of entries, if any.
     :else (do
-            (l/debug "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
+            (l/trace "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
             (when (> (count (:entries data)) 0)
               (l/trace "Next index value before: " (state/get-next-index-for-server server-info))
               (state/add-next-index-for-server server-info (count (:entries data)))

@@ -24,7 +24,7 @@
        (persistence/has-log-at-term-and-index?
         (:prev-log-term request)
         (:prev-log-index request)))  (do
-                                       (l/debug "Non-empty list but has-log-at-index-with-term? with prevLogIndex:"
+                                       (l/trace "Non-empty list but has-log-at-index-with-term? with prevLogIndex:"
                                                 (:prev-log-index request)
                                                 "and prevLogTerm: " (:prev-log-term request) "returned false.")
                                        false)
@@ -57,7 +57,7 @@
 (defn become-a-follower
   "Become a follower."
   [& [new-term]]
-  (l/debug "Changing state to be a follower...")
+  (l/trace "Changing state to be a follower...")
   (state/update-current-term-and-voted-for (or new-term (state/get-current-term)) nil)
   (state/become-follower))
 
@@ -81,7 +81,7 @@
     (when can-append?
       (append-log-entries request))
     (when (and log-entries (not can-append?))
-      (l/debug "Has log entries but can't append."))
+      (l/trace "Has log entries but can't append."))
     ;; (If request term > current term then update to new term and become a follower.)
     ;;           OR
     ;; (If this server is a candidate OR a leader AND an AppendEntries RPC

@@ -64,7 +64,7 @@
     (let [http-service-options {:ssl? false
                                 :http? true
                                 :join? false
-                                :port (:port this-raft-server 11010)}
+                                :port (:port this-raft-server 11000)}
           http-service (jetty/run-jetty (routes/app) http-service-options)]
       (start-raft-service all-raft-servers this-raft-server)
       (l/info "raft service started on port: " (:port http-service-options))
