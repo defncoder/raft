@@ -9,7 +9,8 @@
    [raft.state :as state]
    [raft.config :as config]
    [ring.adapter.jetty :as jetty]
-   [raft.routes :as routes])
+   [raft.routes :as routes]
+   [raft.leader :as leader])
   (:gen-class))
 
 (defn- cli-options
@@ -48,7 +49,8 @@
   [all-servers this-server]
   (state/init-with-servers all-servers this-server)
   (follower/become-a-follower)
-  (election/async-election-loop))
+  (election/async-election-loop)
+  (leader/async-log-replication-thread))
 
 (defn- startup-services
   "A convenient startup function that can be used by lein ring plugins."

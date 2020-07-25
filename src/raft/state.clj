@@ -185,6 +185,11 @@
   []
   @other-servers)
 
+(defn other-servers-count
+  "Get number of other servers."
+  []
+  (count (get-other-servers)))
+
 (defn get-this-server
   "Get info about this server."
   []
