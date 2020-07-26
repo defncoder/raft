@@ -12,7 +12,7 @@ do
 	is_process_running ${CUR_PROC_ID}
 	if [ $? -eq 0 ]
 	then
-	    kill -9 ${CUR_PROC_ID}
+	    kill -9 ${CUR_PROC_ID} > /dev/null 2>&1
 	    rm -f pid${idx}.txt
 	fi
     fi

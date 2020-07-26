@@ -147,6 +147,7 @@
   log entries are appended.
   Returns the last log index AND the index of the first new log index. This can be used to delete these logs if required."
   [log-entries current-term]
+  (l/trace "Beginning to store new log entries...")
   (sql/with-db-transaction [t-conn (db-connection)]
     (let [last-log-index (get-last-log-index t-conn)
           next-log-index (inc last-log-index)
@@ -155,7 +156,9 @@
                                log-entries
                                (range next-log-index Integer/MAX_VALUE))]
       (save-log-entries indexed-entries t-conn)
-      next-log-index)))
+      (l/trace "Done saving new log entries...")
+      ;; Return the range of indices of the new log entries: [start-index...end-index] inclusive.
+      [next-log-index (+ next-log-index (count log-entries) -1)])))
 
 (defn migrate-db
   "Migrate the database."

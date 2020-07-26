@@ -27,6 +27,7 @@
   (resp/response {:name "Raft consensus service"
                   :version "1.0.0"
                   :status "Healthy!"
+                  :is-leader? (state/is-leader?)
                   :clojure-version (clojure-version)}))
 
 (defn add-logentry-handler

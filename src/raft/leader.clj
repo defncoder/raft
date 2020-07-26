@@ -9,17 +9,17 @@
    [raft.util :as util]))
 
 (def request-channel-for-sync (async/chan 100))
-(def response-channel-for-sync (async/chan 100))
 
 (defn- is-server-trailing?
-  "Is a server trailing the current server in logs synced?"
-  [server-info]
-  (>= (persistence/get-last-log-index) (state/get-next-index-for-server server-info)))
+  "Is a server trailing the current server in logs when only considering those logs up to the given index?"
+  [server-info & [up-to-index]]
+  (>= (or up-to-index (persistence/get-last-log-index)) (state/get-next-index-for-server server-info)))
 
 (defn- get-other-up-to-date-servers
-  "Get a list of other servers that are up to date with the current server (which is the leader)."
-  []
-  (remove is-server-trailing? (state/get-other-servers)))
+  "Get a list of other servers that are in sync with the current server(the leader), up to the given index.
+  If no up-to-index is given, then check up to the last index of this server."
+  [ & [up-to-index] ]
+  (remove #(is-server-trailing? %1 up-to-index) (state/get-other-servers)))
 
 (defn- prepare-heartbeat-payload
   "Prepare the heartbeat payload for followers."
@@ -116,28 +116,32 @@
 
 (defn- send-log-entries-to-follower
   "Send log entries to a server. For now, retries indefinitely on communication errors."
-  [server request-channel response-channel]
+  [server request-channel]
   (async/thread
-    (while (async/<!! request-channel)
-      (loop []
-        (let [payload (and (state/is-leader?)
-                           (prepare-append-payload-for-follower server))]
-          (when (not-empty (:entries payload))
-            (l/trace "Making http request to: " (util/qualified-server-name server) "with payload:" payload)
-            (let [response (http/make-server-request server "/replicate" payload 100)]
-              (l/trace "Response from follower:" (util/qualified-server-name server) "is:" response)
-              (if (:error response)
-                (Thread/sleep 100)
-                (process-append-logs-response server payload response))
-              (recur)))))
-      ;; Notify orchestrator that sync to this server is complete.
-      (l/trace "Done sending logs to server: " (util/qualified-server-name server))
-      (async/>!! response-channel server))))
+    ;; Wait for an incoming request from the orchestrator to sync with this server.
+    (while true
+      (let [response-channel (async/<!! request-channel)]
+        (l/debug "Starting to send logs to server:" (util/qualified-server-name server))
+        (loop []
+          (let [payload (and (state/is-leader?)
+                             (prepare-append-payload-for-follower server))]
+            (when (not-empty (:entries payload))
+              (l/trace "Making http request to: " (util/qualified-server-name server) "with payload:" payload)
+              (let [response (http/make-server-request server "/replicate" payload 100)]
+                (l/trace "Got response from follower:" (util/qualified-server-name server))
+                (l/trace "Response from follower:" (util/qualified-server-name server) "is:" response)
+                (if (:error response)
+                  (Thread/sleep 100)
+                  (process-append-logs-response server payload response))
+                (recur)))))
+        ;; Notify orchestrator that sync to this server is complete.
+        (l/trace "Done sending logs to server:" (util/qualified-server-name server))
+        (async/>!! response-channel true)))))
 
 (defn- is-majority-in-sync?
   "Are the logs in a majority of servers, including the leader, in sync?"
-  []
-  (>= (inc (count (get-other-up-to-date-servers)))
+  [ & [up-to-index] ]
+  (>= (inc (count (get-other-up-to-date-servers up-to-index)))
       (state/majority-number)))
 
 (defn- update-commit-index
@@ -152,30 +156,11 @@
       (l/debug "Setting commit-index to: " majority-replicated-index)
       (state/set-commit-index majority-replicated-index))))
 
-(defn- handle-sync-progress
-  "Handle progress updates from the currently ongoing syncs to trailing servers."
-  [channel]
-  (async/go-loop [do-dispatch true]
-    ;; Listen for log sync completion message from any of the sync attempts going on in parallel.
-    (let [server (async/<! channel)]
-      (l/trace "Completed sending log to: " (util/qualified-server-name server))
-      (if (and do-dispatch (is-majority-in-sync?))
-        (do
-          (update-commit-index)
-          (l/trace "Notifying response channel that majority replication is complete")
-          ;; When a majority of servers, counting self, are up-to-date notify original log append requestor in response channel.
-          (async/>! response-channel-for-sync true)
-          ;; This recur to the go-loop is to drain out any remaining data on the internal-channel
-          ;; Note that this data won't be used to notify the response-channel-for-sync because it was
-          ;; just notified in the above call.
-          (recur false))
-        (recur do-dispatch)))))
-
 (defn- make-comm-channel
   "Make a channel to use for communicating in one direction to another thread.
   Use a default buffer size of 100."
   [ & [buffer-size] ]
-  (async/chan (async/sliding-buffer (or buffer-size 100))))
+  (async/chan (async/sliding-buffer (or buffer-size 500))))
 
 (defn async-log-replication-thread
   "Orchestration thread for managing sending logs to all other servers.
@@ -183,34 +168,26 @@
   Function completes as soon as this server becomes a follower."
   []
   (async/thread
-    (let [servers (vec (state/get-other-servers))
-          num-servers (count servers)
-          ;; Create num-other-servers number of channels used to initiate work on worker threads.
-          worker-channels (->> (repeatedly make-comm-channel)
-                               (take num-servers)
-                               vec)
-          ;; A single channel for listening to sync completions. Note: Channel's buffer size is 100.
-          completion-channel (make-comm-channel)]
-      (doseq [n (range num-servers)]
-        ;; Kickoff async threads to do the syncing with the other servers.
-        ;; Each of the thread is going to wait for a request through its work channel and will
-        ;; respond to work completion through the single completion channel that's common for all worker threads.
-        (send-log-entries-to-follower (nth servers n) (nth worker-channels n) completion-channel))
-      ;; Loop that waits for a new message on the request-channel-for-sync.
+    (let [servers (state/get-other-servers)
+          ;; Create one channel for each server used to initiate synch on worker threads.
+          worker-channels  (take (count servers) (repeatedly make-comm-channel))]
+      ;; Kickoff async threads to do the syncing with the other servers.
+      ;; Each of the thread is going to wait for a request through its work channel and will
+      ;; respond to work completion through the single response channel that's common for all worker threads.
+      (doall (map send-log-entries-to-follower servers worker-channels))
+      ;; Loop that waits for a new message on the request-channel-for-sync that will be invoked when
+      ;; clients append new log entries.
       (loop []
-        ;; Wait for a new sync request with a true in it. A false indicates this server
-        ;; became a follower while this thread was waiting on a new event in the request-channel-for-sync
-        (async/<!! request-channel-for-sync)
-        ;; Send a message to all worker channels to notify them to start syncing with their corresponding server
-        (doall (map #(async/>!! %1 %2) worker-channels servers))
-        ;; A common sync progress handler to deal with work completion responses as and when they appear.
-        (handle-sync-progress completion-channel)
+        ;; Wait for a new sync request from client
+        (let [response-channel (async/<!! request-channel-for-sync)]
+          ;; Send a message on worker channels for worker threads to start syncing with their corresponding servers
+          (doall (map #(async/>!! %1 response-channel) worker-channels)))
         (recur)))))
 
 (defn become-a-leader
   "Become a leader and initiate appropriate activities."
   []
-  (l/info "Won election. Becoming a leader!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+  (l/debug (util/qualified-server-name (state/get-this-server)) "is the new leader!!!!!!!!!!!!!!!!!!!!!!.")
   (state/become-leader)
   (async-heartbeat-loop))
 
@@ -218,10 +195,18 @@
   "Handle and append logs request from a client when this server is the leader."
   [request]
   (if-let [log-entries (not-empty (:entries request))]
-    (let [log-index (persistence/append-new-log-entries-from-client log-entries
-                                                                    (state/get-current-term))]
-      (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries log-index (count log-entries)))
-      (async/>!! request-channel-for-sync true)
-      (async/<!! response-channel-for-sync)
-      (persistence/get-log-entries log-index (count log-entries)))
+    (let [[start-log-index end-log-index] (persistence/append-new-log-entries-from-client log-entries (state/get-current-term))
+          response-channel (async/chan (state/get-num-servers))]
+      (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries start-log-index (count log-entries)))
+      (l/debug "Start log index:" start-log-index "End log index:" end-log-index)
+      (async/>!! request-channel-for-sync response-channel)
+      (while (not (is-majority-in-sync? end-log-index))
+        ;; Wait for a notification from any of the synch worker threads.
+        (async/<!! response-channel)
+        (l/trace "Got notification from worker thread..."))
+      (async/close! response-channel)
+      ;; Drain any unused values from the response-channel so it can be reclaimed by the runtime.
+      (while (async/<!! response-channel))
+      (update-commit-index)
+      (persistence/get-log-entries start-log-index (count log-entries)))
     []))

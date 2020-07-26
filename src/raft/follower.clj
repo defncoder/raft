@@ -2,7 +2,8 @@
   (:require
    [clojure.tools.logging :as l]
    [raft.persistence :as persistence]
-   [raft.state :as state]))
+   [raft.state :as state]
+   [raft.util :as util]))
 
 (defn- can-append-logs?
   "Check if logs from AppendRequest can be used:
@@ -57,7 +58,7 @@
 (defn become-a-follower
   "Become a follower."
   [& [new-term]]
-  (l/trace "Changing state to be a follower...")
+  (l/debug (util/qualified-server-name (state/get-this-server)) "is now a follower.")
   (state/update-current-term-and-voted-for (or new-term (state/get-current-term)) nil)
   (state/become-follower))
 

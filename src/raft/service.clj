@@ -52,6 +52,26 @@
   (election/async-election-loop)
   (leader/async-log-replication-thread))
 
+;; (defn start-http-service-at-port
+;;   "Try to start the http service at the given port number on localhost."
+;;   [routes port]
+;;   (try
+;;     (let [server (jetty/run-jetty routes {:ssl? false
+;;                                           :http? true
+;;                                           :join? false
+;;                                           :port port
+;;                                           :configurator (fn [_] (prn (str "Starting on port: " port)))})]
+;;       [server port])
+;;     (catch Exception e
+;;       (l/debug (.getMessage e))
+;;       nil)
+;;     (finally )))
+
+;; (defn start-http-service
+;;   "Start the http service."
+;;   [routes]
+;;   (some #(start-http-service-at-port routes %) (range 10001 10006)))
+
 (defn- startup-services
   "A convenient startup function that can be used by lein ring plugins."
   [ & [parsed-cli]]
@@ -64,7 +84,7 @@
     (let [http-service-options {:ssl? false
                                 :http? true
                                 :join? false
-                                :port (:port this-raft-server 11000)}
+                                :port (:port this-raft-server 10000)}
           http-service (jetty/run-jetty (routes/app) http-service-options)]
       (start-raft-service all-raft-servers this-raft-server)
       (l/info "raft service started on port: " (:port http-service-options))
@@ -77,4 +97,3 @@
   (l/trace "Parsed args: " (cli/parse-opts args (cli-options)))
   (l/trace "Deployment details: " (config/read-deployment-details "deployment.edn"))
   (startup-services (cli/parse-opts args (cli-options))))
-
