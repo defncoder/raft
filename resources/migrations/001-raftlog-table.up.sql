@@ -1,5 +1,6 @@
 CREATE TABLE raftlog (
-  idx         INTEGER PRIMARY KEY,
+  idx         INTEGER,
   term        INTEGER,
-  command     BLOB
+  command     BLOB,
+  PRIMARY KEY(idx, term)
 );

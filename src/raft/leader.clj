@@ -65,7 +65,7 @@
   [server]
   (when (state/is-leader?)
     (let [index (state/get-next-index-for-server server)
-          log-entries (persistence/get-log-entries index 20)
+          log-entries (persistence/get-log-entries index 50)
           prev-log-entry (persistence/get-prev-log-entry index)
           prev-log-index (:idx prev-log-entry 0)
           prev-log-term  (:term prev-log-entry 0)]
@@ -99,9 +99,13 @@
     ;; Receiving server couldn't accept log-entries we sent because
     ;; it would create a gap in its log.
     ;; If AppendEntries fails because of log inconsistency then decrement nextIndex and retry (§5.3)
+    ;; Note that if a follower responds with data that includes the :recent-term-min-index key, then
+    ;; it is used here to skip over entries that can be avoided. Refer to §5.3 pages 7 and 8 for details
+    ;; on this optimization.
     (not (:success response)) (do
-                                (l/trace "Got a log-inconsistency result. Retrying with previous index.")
-                                (state/set-next-index-for-server server-info (:prev-log-index data 1))
+                                (l/debug "Got a log-inconsistency result. Retrying with recent-term-min-index or previous index." response)
+                                (state/set-next-index-for-server server-info (or (:recent-term-min-index response)
+                                                                                 (:prev-log-index data 1)))
                                 true)
     
     ;; Successfully sent log entries to server. Try next set of entries, if any.
@@ -121,7 +125,7 @@
     ;; Wait for an incoming request from the orchestrator to sync with this server.
     (while true
       (let [response-channel (async/<!! request-channel)]
-        (l/debug "Starting to send logs to server:" (util/qualified-server-name server))
+        (l/trace "Starting to send logs to server:" (util/qualified-server-name server))
         (loop []
           (let [payload (and (state/is-leader?)
                              (prepare-append-payload-for-follower server))]
@@ -153,7 +157,7 @@
                               sort)
         majority-replicated-index (nth sorted-match-indices (- (state/get-num-servers) (state/majority-number)))]
     (when (> majority-replicated-index (state/get-commit-index))
-      (l/debug "Setting commit-index to: " majority-replicated-index)
+      (l/trace "Setting commit-index to: " majority-replicated-index)
       (state/set-commit-index majority-replicated-index))))
 
 (defn- make-comm-channel
@@ -198,7 +202,7 @@
     (let [[start-log-index end-log-index] (persistence/append-new-log-entries-from-client log-entries (state/get-current-term))
           response-channel (async/chan (state/get-num-servers))]
       (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries start-log-index (count log-entries)))
-      (l/debug "Start log index:" start-log-index "End log index:" end-log-index)
+      (l/trace "Start log index:" start-log-index "End log index:" end-log-index)
       (async/>!! request-channel-for-sync response-channel)
       (while (not (is-majority-in-sync? end-log-index))
         ;; Wait for a notification from any of the synch worker threads.
@@ -208,5 +212,6 @@
       ;; Drain any unused values from the response-channel so it can be reclaimed by the runtime.
       (while (async/<!! response-channel))
       (update-commit-index)
+      (l/trace "Successfully added and synchronized new logs")
       (persistence/get-log-entries start-log-index (count log-entries)))
     []))

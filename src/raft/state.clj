@@ -85,7 +85,9 @@
   "Set the new commit index for this server."
   [index]
   (swap! commit-index (fn [old-index] (if (> index old-index)
-                                        index
+                                        (do
+                                          (l/debug "Setting commit-index to:" index)
+                                          index)
                                         old-index))))
 
 (defn get-num-servers

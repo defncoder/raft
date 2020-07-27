@@ -19,17 +19,17 @@
     (cond
       (< request-term current-term) (do
                                       (l/debug "Non-empty list but request term " request-term "is less than current term:" current-term)
-                                      false)
-      (empty? (:entries request)) false
+                                      [false nil])
+      (empty? (:entries request)) [false nil]
       (not
        (persistence/has-log-at-term-and-index?
         (:prev-log-term request)
         (:prev-log-index request)))  (do
-                                       (l/trace "Non-empty list but has-log-at-index-with-term? with prevLogIndex:"
+                                       (l/debug "Non-empty list but has-log-at-index-with-term? with prevLogIndex:"
                                                 (:prev-log-index request)
                                                 "and prevLogTerm: " (:prev-log-term request) "returned false.")
-                                       false)
-      :else true)))
+                                       [false (or (persistence/get-first-log-entry-for-term<= (:prev-log-term request)) {})])
+      :else [true nil])))
 
 (defn- new-commit-index-for-request
   "If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry in request)"
@@ -58,7 +58,7 @@
 (defn become-a-follower
   "Become a follower."
   [& [new-term]]
-  (l/debug (util/qualified-server-name (state/get-this-server)) "is now a follower.")
+  (l/trace (util/qualified-server-name (state/get-this-server)) "is now a follower.")
   (state/update-current-term-and-voted-for (or new-term (state/get-current-term)) nil)
   (state/become-follower))
 
@@ -78,7 +78,7 @@
   ;; Remember current leader. Will be useful to redirect client requests to this server.
   (state/set-current-leader (:leader-id request))
   (let [log-entries (not-empty (:entries request))
-        can-append?  (can-append-logs? request)]
+        [can-append? first-recent-term-log-entry] (can-append-logs? request)]
     (when can-append?
       (append-log-entries request))
     (when (and log-entries (not can-append?))
@@ -91,4 +91,9 @@
               (not (state/is-follower?)))
       (become-a-follower (max (:term request) (state/get-current-term))))
     ;; Return the response for the request.
-    {:term (state/get-current-term) :success (if log-entries can-append? true)}))
+    (let [response {:term (state/get-current-term) :success (if log-entries can-append? true)}]
+      (if first-recent-term-log-entry
+        ;; This is to implement the optimization to handle conflicting log entries as described in
+        ;; https://raft.github.io/raft.pdf in section §5.3 on pages 7 and 8.
+        (assoc response :recent-term (or (:term first-recent-term-log-entry) 1) :recent-term-min-index (or (:idx first-recent-term-log-entry) 1))
+        response))))

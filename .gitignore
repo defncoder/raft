@@ -11,3 +11,4 @@ pom.xml.asc
 /*.iml
 log*.txt
 pid?.txt
+raft.log

@@ -103,6 +103,33 @@
       (first)
       (:term 0)))
 
+(defn get-first-index-for-term
+  "Get the first index for a given term or nil."
+  [term]
+  (-> (sql/query (db-connection) ["SELECT min(idx) as idx FROM raftlog WHERE term = ?" term])
+      first
+      (:idx 0)))
+
+(defn get-first-log-entry-for-term<=
+  "Get the first entry for the most recent term that is less than or equal to a given term."
+  [term]
+  (-> (sql/query (db-connection) ["SELECT min(idx) AS idx, term, command FROM raftlog WHERE term = (SELECT max(term) FROM raftlog WHERE term <= ?)" term])
+      first))
+
+(defn get-most-recent-term
+  "Get the most recent term in the log."
+  []
+  (-> (sql/query (db-connection) ["SELECT max(term) as term FROM raftlog"])
+      (first)
+      (:term 0)))
+
+(defn get-min-index-for-most-recent-term
+  "Get the min index value for the most recent term. Helpful in optimizing log synchronization when there are conflicts.
+  Returns a map with two keys :idx and :term"
+  []
+  (-> (sql/query (db-connection) ["SELECT min(idx) AS idx, term FROM raftlog WHERE term = (SELECT max(term) FROM raftlog)"])
+      first))
+
 (defn get-prev-log-entry
   "Get the log entry that precedes the log at the given index."
   [log-index]
@@ -123,7 +150,7 @@
   [new-log-index new-log-term]
   (sql/execute! (db-connection)
                 ["DELETE FROM raftlog where idx >= 
-                    (SELECT idx FROM raftlog WHERE idx = ? AND term != ?)" new-log-index new-log-term]))
+                    (SELECT idx FROM raftlog WHERE idx = ? AND term != ? LIMIT 1)" new-log-index new-log-term]))
 
 (defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
@@ -155,7 +182,8 @@
           indexed-entries (map #(assoc %1 :idx %2 :term current-term)
                                log-entries
                                (range next-log-index Integer/MAX_VALUE))]
-      (save-log-entries indexed-entries t-conn)
+      ;; Save 20 log entries at a time.
+      (doall (map #(save-log-entries %1 t-conn) (partition 20 20 [] indexed-entries)))
       (l/trace "Done saving new log entries...")
       ;; Return the range of indices of the new log entries: [start-index...end-index] inclusive.
       [next-log-index (+ next-log-index (count log-entries) -1)])))
