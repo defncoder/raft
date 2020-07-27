@@ -21,6 +21,14 @@
   [ & [up-to-index] ]
   (remove #(is-server-trailing? %1 up-to-index) (state/get-other-servers)))
 
+(defn- prepare-no-op-payload
+  "Make a no-op payload that'll be used to initiate an append request in the current log.
+  This is done so as to make sure the new leader knows about the latest entries that are committed.
+  Refer to sec §8, page 13 of https://raft.github.io/raft.pdf"
+  []
+  {:requestid "NO-OP"
+   :entries [{:command "NO-OP"}]})
+
 (defn- prepare-heartbeat-payload
   "Prepare the heartbeat payload for followers."
   []
@@ -188,13 +196,6 @@
           (doall (map #(async/>!! %1 response-channel) worker-channels)))
         (recur)))))
 
-(defn become-a-leader
-  "Become a leader and initiate appropriate activities."
-  []
-  (l/debug (util/qualified-server-name (state/get-this-server)) "is the new leader!!!!!!!!!!!!!!!!!!!!!!.")
-  (state/become-leader)
-  (async-heartbeat-loop))
-
 (defn handle-append
   "Handle and append logs request from a client when this server is the leader."
   [request]
@@ -215,3 +216,14 @@
       (l/trace "Successfully added and synchronized new logs")
       (persistence/get-log-entries start-log-index (count log-entries)))
     []))
+
+(defn become-a-leader
+  "Become a leader and initiate appropriate activities."
+  []
+  (l/debug (util/qualified-server-name (state/get-this-server)) "is the new leader!!!!!!!!!!!!!!!!!!!!!!.")
+  (state/become-leader)
+  (async-heartbeat-loop)
+  ;; Append a no-op payload as soon as this server becomes a leader.
+  ;; This ensures this server will know if there are any other servers that
+  ;; might've superseded this leader. This avoids stale data.
+  (handle-append (prepare-no-op-payload)))
