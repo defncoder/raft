@@ -38,7 +38,7 @@
   [timeout]
   (l/trace "Sending heartbeat requests to other servers...")
   (let [heartbeat-request (prepare-heartbeat-payload)
-        servers (get-other-up-to-date-servers)]
+        servers (state/get-other-servers)]
     ;; Process all heartbeat responses. This is done for the side-effect. The return value
     ;; from this function is not relevant.
     (doseq [server servers]
@@ -199,7 +199,7 @@
   "Handle and append logs request from a client when this server is the leader."
   [request]
   (if-let [log-entries (not-empty (:entries request))]
-    (let [[start-log-index end-log-index] (persistence/append-new-log-entries-from-client log-entries (state/get-current-term))
+    (let [[start-log-index end-log-index] (persistence/append-new-log-entries-from-client log-entries (state/get-current-term) (:requestid request))
           response-channel (async/chan (state/get-num-servers))]
       (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries start-log-index (count log-entries)))
       (l/trace "Start log index:" start-log-index "End log index:" end-log-index)

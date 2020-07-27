@@ -55,12 +55,6 @@
   (sql/execute! (db-connection)
                 ["INSERT OR REPLACE INTO terminfo VALUES (1, (?), (?))" new-term, voted-for]))
 
-(defn add-new-log-entry
-  "Add a new log entry to the local DB."
-  [term command]
-  (sql/execute! (db-connection)
-                ["INSERT INTO raftlog (idx, term, command) VALUES ((SELECT count(*) FROM raftlog)+1, (?), (?))" term, command]))
-
 (defn get-log-entries
   "Get log entries starting from an index and up to limit number of items."
   [start-index limit]
@@ -90,7 +84,7 @@
     true  ;; When index and term are zero it is the start of the log
     (-> (sql/query
          (db-connection)
-         ["select idx from raftlog where term = ? and idx = ?" term index])
+         ["SELECT idx FROM raftlog WHERE term = ? and idx = ?" term index])
         (first)
         (:idx false))))
 
@@ -113,7 +107,9 @@
 (defn get-first-log-entry-for-term<=
   "Get the first entry for the most recent term that is less than or equal to a given term."
   [term]
-  (-> (sql/query (db-connection) ["SELECT min(idx) AS idx, term, command FROM raftlog WHERE term = (SELECT max(term) FROM raftlog WHERE term <= ?)" term])
+  (-> (sql/query
+       (db-connection)
+       ["SELECT min(idx) AS idx, term, requestid, command FROM raftlog WHERE term = (SELECT max(term) FROM raftlog WHERE term <= ?)" term])
       first))
 
 (defn get-most-recent-term
@@ -155,13 +151,13 @@
 (defn- log-entry-as-vec
   "Make a vector of field values from a LogEntry. Useful for DB manipulation."
   [log-entry]
-  [(:idx log-entry) (:term log-entry) (:command log-entry)])
+  [(:idx log-entry) (:term log-entry) (:requestid log-entry) (:command log-entry)])
 
 (defn save-log-entries
   "Add only those log entries that are missing from local storage."
   [log-entries & [t-conn]]
   (let [log-values-vec (vec (map log-entry-as-vec log-entries))
-        sql-statement ["INSERT INTO raftlog (idx, term, command) VALUES ((?), (?), (?)) ON CONFLICT DO NOTHING"]
+        sql-statement ["INSERT INTO raftlog (idx, term, requestid, command) VALUES ((?), (?), (?), (?)) ON CONFLICT DO NOTHING"]
         stmt-with-args (vec (concat sql-statement log-values-vec))]
     ;; (l/debug "Log values vector is: " log-values-vec)
     (sql/execute! (or t-conn (db-connection)) stmt-with-args {:multi? true})))
@@ -173,13 +169,13 @@
   of other DB operations interleaving between when the last-log-index is read vs when the new
   log entries are appended.
   Returns the last log index AND the index of the first new log index. This can be used to delete these logs if required."
-  [log-entries current-term]
+  [log-entries current-term requestid]
   (l/trace "Beginning to store new log entries...")
   (sql/with-db-transaction [t-conn (db-connection)]
     (let [last-log-index (get-last-log-index t-conn)
           next-log-index (inc last-log-index)
           ;; Set :idx for the new log entries to start from next-log-index
-          indexed-entries (map #(assoc %1 :idx %2 :term current-term)
+          indexed-entries (map #(assoc %1 :idx %2 :term current-term :requestid requestid)
                                log-entries
                                (range next-log-index Integer/MAX_VALUE))]
       ;; Save 20 log entries at a time.

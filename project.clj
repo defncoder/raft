@@ -14,13 +14,6 @@
                  [ch.qos.logback/logback-core "1.2.3"]
                  [ch.qos.logback/logback-classic "1.2.3"]
                  
-                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-core
-                 ;; [org.apache.logging.log4j/log4j-core "2.13.0"]
-                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-api
-                 ;; [org.apache.logging.log4j/log4j-api "2.13.0"]
-                 ;; ;; https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl
-                 ;; [org.apache.logging.log4j/log4j-slf4j-impl "2.13.0"]
-
                  ;; database
                  [com.zaxxer/HikariCP "3.3.1"] ;; for connection pool
                  [ragtime "0.8.0"] ;; for migrations
@@ -51,7 +44,6 @@
             ;; [lein-shell "0.5.0"]
             ;; [lein-ancient "0.6.15"]
             ;; [lein-changelog "0.3.2"]
-            ;; [lein-protoc "0.5.0"]
             ]
 
   ;; :ring {:handler raft.routes/app

@@ -13,12 +13,14 @@
             [ring.middleware.json :as json]
             [ring.middleware.session :refer :all]
             [clojure.tools.logging :as l]
-            [ring.util.response :as resp]))
+            [ring.util.response :as resp])
+  (:import [java.util UUID]))
 
 (defn- make-test-payload
   "docstring"
   [start n]
-  {:entries (mapv #(assoc {} :command (str "Command " %)) (range start (+ start n)))})
+  {:requestid (str (UUID/randomUUID))
+   :entries (mapv #(assoc {} :command (str "Command " %)) (range start (+ start n)))})
 
 (defn health-check-handler
   "Handle health check request."

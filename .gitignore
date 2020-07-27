@@ -12,3 +12,4 @@ pom.xml.asc
 log*.txt
 pid?.txt
 raft.log
+/logs
