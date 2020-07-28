@@ -60,6 +60,13 @@
   [start-index limit]
   (sql/query (db-connection) ["SELECT * FROM raftlog WHERE idx >= ? ORDER BY idx LIMIT ?" start-index limit]))
 
+(defn get-log-with-index
+  "Get a specific logentry."
+  [idx]
+  (->
+   (sql/query (db-connection) ["SELECT * FROM raftlog WHERE idx = ?" idx])
+   first))
+
 (defn get-last-log-entry
   "Get the last log entry from persistent storage."
   []

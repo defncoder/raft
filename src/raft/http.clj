@@ -38,6 +38,30 @@
    :async? async?
    :connection-manager (if async? async-cm sync-cm)})
 
+(defn make-async-server-request-with-channel
+  "Make an async server request and post the response to the channel."
+  [server endpoint data timeout channel]
+  (make-async-server-request server endpoint data timeout #(async/put! channel {server %})))
+
+(defn send-data-to-some-servers
+  "Send a piece of data to at least some number of servers to a specified endpoint.
+  Return a collection of responses from them."
+  [data servers min-count endpoint timeout]
+  (let [num (count servers)
+        channel (async/chan num)]
+    ;; Issue async requests to other servers.
+    (doall (map #(make-async-server-request-with-channel % endpoint data timeout channel) servers))
+    ;; Read results from channel
+    (loop [i 0
+           result []]
+      (if (= i min-count)
+        (do
+          (async/close! channel)
+          ;; Drain any unused values so the channel can be reclaimed by the runtime.
+          (while (async/<!! channel))
+          result)
+        (recur (dec i) (conj result (async/<!! channel)))))))
+
 (defn send-data-to-servers
   "Send a piece of data to all servers to a specified endpoint.
   Return a collection of responses from them."
@@ -45,17 +69,15 @@
   (let [num (count servers)
         channel (async/chan num)]
     ;; Issue async requests to other servers.
-    (doseq [server-info servers]
-      (make-async-server-request server-info endpoint data timeout #(async/go (async/>! channel %))))
-
+    (doall (map #(make-async-server-request-with-channel % endpoint data timeout channel) servers))
     ;; Read results from channel
     (loop [i num
-           result []]
+           result {}]
       (if (= 0 i)
         (do
           (async/close! channel)
-          result)
-        (recur (dec i) (conj result (async/<!! channel)))))))
+          (map #(get result %) servers))
+        (recur (dec i) (merge result (async/<!! channel)))))))
 
 (defn make-async-server-request
   "Make an async server request and send the result to a channel."

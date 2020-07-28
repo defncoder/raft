@@ -70,6 +70,19 @@
      follower/handle-append-request
      resp/response)))
 
+(defn get-log-with-index-handler
+  "Get log..."
+  [log-index]
+  (if (state/is-leader?)
+    (->>
+     log-index
+     (Integer.)
+     leader/get-log-with-index
+     resp/response)
+    (let [leader-url (str "http://" (state/get-current-leader) "/logs/" log-index)]
+      (l/info "Redirecting to leader:" leader-url)
+      (resp/redirect leader-url :temporary-redirect))))
+
 (defn vote-handler
   "Handle a request for vote."
   [req]
@@ -88,6 +101,7 @@
      (POST "/vote" req (vote-handler req))
      (POST "/replicate" req (replicate-handler req))
      (POST "/logs" req (add-logentry-handler req))
+     (GET "/logs/:log-index" [log-index] (get-log-with-index-handler log-index))
      (GET "/test-logs" req
           (do
             (l/trace "test-logs request is:" req)

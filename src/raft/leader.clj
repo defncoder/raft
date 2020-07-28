@@ -52,6 +52,28 @@
     (doseq [server servers]
       (http/make-async-server-request server "/replicate" heartbeat-request timeout #(follower/process-server-response %)))))
 
+(defn- check-if-still-leader
+  "Send a heartbeat request to other servers to make sure a majority(including this server) still agrees that this server is the leader."
+  [timeout]
+  (let [heartbeat-request (prepare-heartbeat-payload)
+        servers (state/get-other-servers)
+        num-servers (count servers)
+        channel (async/chan (count servers))]
+    ;; Send a heartbeat request to other servers.
+    (doall (map #(http/make-async-server-request-with-channel %1 "/replicate" heartbeat-request timeout channel) servers))
+    ;; Process responses to see if current server is still the leader(a majority including self).
+    (loop [num-replies 0 num-votes 1]
+      (if (or (= num-replies num-servers)
+              (>= num-votes (state/majority-number)))
+        (do
+          (async/close! channel)
+          ;; Drain any unused values from the response-channel so it can be reclaimed by the runtime.
+          (while (async/<!! channel))
+          (>= num-votes (state/majority-number)))
+        (let [response (first (vals (async/<!! channel)))]
+          (l/trace "Leader check response:" response)
+          (recur (inc num-replies) (if (:success response) (inc num-votes) num-votes)))))))
+
 (defn- async-heartbeat-loop
   "A separate thread to check and send heartbeat requests to other servers whenever
   this server is the leader."
@@ -195,6 +217,13 @@
           ;; Send a message on worker channels for worker threads to start syncing with their corresponding servers
           (doall (map #(async/>!! %1 response-channel) worker-channels)))
         (recur)))))
+
+(defn get-log-with-index
+  "Get a log with the given id."
+  [log-index]
+  (if (check-if-still-leader 100)
+    (or (persistence/get-log-with-index log-index) {})
+    {:error "This server is not the leader anymore."}))
 
 (defn handle-append
   "Handle and append logs request from a client when this server is the leader."
