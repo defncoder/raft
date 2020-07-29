@@ -6,22 +6,22 @@
   :managed-dependencies [
                          [org.clojure/clojure "1.10.1"]
                          ]
-  :dependencies [[org.xerial/sqlite-jdbc "3.28.0"]
-                 [org.clojure/tools.logging "0.4.1"]
-                 [org.clojure/java.jdbc "0.7.9"]
+  :dependencies [[org.xerial/sqlite-jdbc "3.32.3.2"]
+                 [org.clojure/tools.logging "1.1.0"]
+                 [org.clojure/java.jdbc "0.7.11"]
                  ;; logging
                  [org.slf4j/slf4j-api "1.7.30"]
                  [ch.qos.logback/logback-core "1.2.3"]
                  [ch.qos.logback/logback-classic "1.2.3"]
                  
                  ;; database
-                 [com.zaxxer/HikariCP "3.3.1"] ;; for connection pool
+                 [com.zaxxer/HikariCP "3.4.5"] ;; for connection pool
                  [ragtime "0.8.0"] ;; for migrations
                  ;; JSON
-                 [cheshire/cheshire "5.8.0"]
+                 [cheshire/cheshire "5.10.0"]
 
                  ;; ring, ring middleware and compojure
-                 [ring "1.7.1"]
+                 [ring "1.8.1"]
                  [ring/ring-defaults "0.3.2"]
                  [ring/ring-anti-forgery "1.3.0"]
                  [ring/ring-defaults "0.3.2"]
@@ -32,12 +32,13 @@
                  [clj-http "3.10.1"]
 
                  ;; general component facility
-                 [com.stuartsierra/component "0.4.0"]
+                 [com.stuartsierra/component "1.0.0"]
 
-                 [org.clojure/tools.cli "0.4.2"]
-                 [org.clojure/core.async "0.6.532"]]
+                 [org.clojure/tools.cli "1.0.194"]
+                 [org.clojure/core.async "1.3.610"]]
 
   :plugins [
+            [lein-ancient "0.6.15"]
             ;; [lein-ring "0.12.5"]
             ;; [refactor-nrepl "2.5.0"]
             ;; [lein-cloverage "1.0.13"]
@@ -55,16 +56,12 @@
   :resource-paths ["resources"]
   :target-path "target/%s"
   :profiles {
-             ;; :dev {
-             ;;       ;; :aot [raft.service]
-             ;;       :dependencies []}
              :repl {
                     :plugins [
-                              ;; [lein-ring "0.12.5"]
                               [refactor-nrepl "2.5.0"]
+                              ;; [lein-ring "0.12.5"]
                               ;; [lein-cloverage "1.0.13"]
                               ;; [lein-shell "0.5.0"]
-                              ;; [lein-ancient "0.6.15"]
                               ;; [lein-changelog "0.3.2"]
                               ;; [lein-protoc "0.5.0"]
                               ]}

@@ -138,7 +138,6 @@
     ;; If this server sees an incoming voting request that has a term > this server's term
     ;; then this server must become a follower.
     (when (> request-term current-term)
-      (do
-        (l/trace "Request for vote received with term > current-term. Changing to a follower************" request-term current-term)
-        (follower/become-a-follower request-term)))
+      (l/trace "Request for vote received with term > current-term. Changing to a follower************" request-term current-term)
+      (follower/become-a-follower request-term))
     response))

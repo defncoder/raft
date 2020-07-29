@@ -56,9 +56,7 @@
            result []]
       (if (= i min-count)
         (do
-          (async/close! channel)
-          ;; Drain any unused values so the channel can be reclaimed by the runtime.
-          (while (async/<!! channel))
+          (util/close-and-drain-channel channel)
           result)
         (recur (dec i) (conj result (async/<!! channel)))))))
 
@@ -73,7 +71,7 @@
     ;; Read results from channel
     (loop [i num
            result {}]
-      (if (= 0 i)
+      (if (zero? i)
         (do
           (async/close! channel)
           (map #(get result %) servers))

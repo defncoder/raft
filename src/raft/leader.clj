@@ -8,7 +8,7 @@
    [raft.state :as state]
    [raft.util :as util]))
 
-(def request-channel-for-sync (async/chan 100))
+(def request-channel-for-sync (async/chan 1000))
 
 (defn- is-server-trailing?
   "Is a server trailing the current server in logs when only considering those logs up to the given index?"
@@ -66,9 +66,7 @@
       (if (or (= num-replies num-servers)
               (>= num-votes (state/majority-number)))
         (do
-          (async/close! channel)
-          ;; Drain any unused values from the response-channel so it can be reclaimed by the runtime.
-          (while (async/<!! channel))
+          (util/close-and-drain-channel channel)
           (>= num-votes (state/majority-number)))
         (let [response (first (vals (async/<!! channel)))]
           (l/trace "Leader check response:" response)
@@ -79,13 +77,10 @@
   this server is the leader."
   []
   (async/thread
-    (loop []
-      (when (state/is-leader?)
-        (do
-          (send-heartbeat-to-servers 100)
-          ;; Sleep for 100 milliseconds.
-          (async/<!! (async/timeout 100))
-          (recur))))))
+    (while (state/is-leader?)
+      (send-heartbeat-to-servers 100)
+      ;; Sleep for 100 milliseconds.
+      (async/<!! (async/timeout 100)))))
 
 (defn- prepare-append-payload-for-follower
   "Get the AppendEntries data to send to a particular follower.
@@ -141,7 +136,7 @@
     ;; Successfully sent log entries to server. Try next set of entries, if any.
     :else (do
             (l/trace "Successfully sent log entries to follower: " (util/qualified-server-name server-info))
-            (when (> (count (:entries data)) 0)
+            (when (pos? (count (:entries data)))
               (l/trace "Next index value before: " (state/get-next-index-for-server server-info))
               (state/add-next-index-for-server server-info (count (:entries data)))
               (l/trace "Next index value after: " (state/get-next-index-for-server server-info))
@@ -204,7 +199,7 @@
   (async/thread
     (let [servers (state/get-other-servers)
           ;; Create one channel for each server used to initiate synch on worker threads.
-          worker-channels  (take (count servers) (repeatedly make-comm-channel))]
+          worker-channels (repeatedly (count servers) make-comm-channel)]
       ;; Kickoff async threads to do the syncing with the other servers.
       ;; Each of the thread is going to wait for a request through its work channel and will
       ;; respond to work completion through the single response channel that's common for all worker threads.
@@ -230,7 +225,7 @@
   [request]
   (if-let [log-entries (not-empty (:entries request))]
     (let [[start-log-index end-log-index] (persistence/append-new-log-entries-from-client log-entries (state/get-current-term) (:requestid request))
-          response-channel (async/chan (state/get-num-servers))]
+          response-channel (async/chan 100)]
       (l/trace "Saved the following data to the DB:\n" (persistence/get-log-entries start-log-index (count log-entries)))
       (l/trace "Start log index:" start-log-index "End log index:" end-log-index)
       (async/>!! request-channel-for-sync response-channel)
@@ -238,9 +233,7 @@
         ;; Wait for a notification from any of the synch worker threads.
         (async/<!! response-channel)
         (l/trace "Got notification from worker thread..."))
-      (async/close! response-channel)
-      ;; Drain any unused values from the response-channel so it can be reclaimed by the runtime.
-      (while (async/<!! response-channel))
+      (util/close-and-drain-channel response-channel)
       (update-commit-index)
       (l/trace "Successfully added and synchronized new logs")
       (persistence/get-log-entries start-log-index (count log-entries)))

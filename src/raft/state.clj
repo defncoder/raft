@@ -5,12 +5,20 @@
 
 ;;; Volatile state on all servers
 
-;; total number of servers
-(def num-servers (atom 0))
 ;; index of highest log entry known to be committed (initialized to 0, increases monotonically)
 (def commit-index (atom 0))
 ;; index of highest log entry applied to statemachine (initialized to 0, increases monotonically)
 (def last-applied (atom 0))
+
+;; total number of servers
+(def num-servers (atom 0))
+
+;;; Volatile state on leaders. Reinitialized after election.
+;; For each server, index of the next log entry to send to that server
+;; (initialized to leaderlast log index + 1)
+(def next-index (atom {}))
+;; For each server, index of highest log entry known to be replicated on server(initialized to 0, increases monotonically)
+(def match-index (atom {}))
 
 ;; volatile index of AppendEntries call sequence number from current leader.
 ;; Used to detect liveness. If election timeout happens without call from current
@@ -21,13 +29,6 @@
 ;; Used to detect liveness. If election timeout happens without an AppendEntries
 ;; call OR voting for someone, then a follower can become a candidate.
 (def voted-sequence (atom 0))
-
-;;; Volatile state on leaders. Reinitialized after election.
-;; For each server, index of the next log entry to send to that server
-;; (initialized to leaderlast log index + 1)
-(def next-index (atom {}))
-;; For each server, index of highest log entry known to be replicated on server(initialized to 0, increases monotonically)
-(def match-index (atom {}))
 
 ;; A synchronized set of in-memory values that mirrors the persistent values of current_term and voted_for within
 ;; the terminfo DB table.
@@ -57,9 +58,10 @@
   (>= num (majority-number)))
 
 (defn- initial-index-map
-  "Make a next-index map for known servers."
-  [servers leader-last-log-index]
-  (reduce #(assoc %1 %2 leader-last-log-index) {} servers))
+  "Make a map where each server passed in will be a key and will have the same value.
+  Used for initializing next index, match index, etc."
+  [servers value]
+  (reduce #(assoc %1 %2 value) {} servers))
 
 (defn- server-names
   "Get an array of server names from server deployment info."
@@ -122,9 +124,9 @@
         last-log-entry (persistence/get-last-log-entry)
         last-log-index (if (not-empty last-log-entry) (:idx last-log-entry 0) 0)]
     ;; Initialize next-index array entries to last-log-index+1
-    (swap! next-index (fn [_] (initial-index-map names (inc last-log-index))))
+    (reset! next-index (initial-index-map names (inc last-log-index)))
     ;; Initialize match-index array entries to 0
-    (swap! match-index (fn [_] (initial-index-map names 0)))))
+    (reset! match-index (initial-index-map names 0))))
 
 (defn init-with-servers
   "Initialize volatile state for a given number of servers in the cluster."

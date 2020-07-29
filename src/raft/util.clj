@@ -1,5 +1,8 @@
 (ns raft.util
-  (:require [clojure.string :as str]))
+  (:require
+   [clojure.core.async :as async]
+   [clojure.string :as str]
+   ))
 
 (defn qualified-server-name
   "Make a qualified server name to be used within the service code when referring to a server at a hostname and port."
@@ -27,3 +30,13 @@
        (get server-info :host "localhost")
        (or (and (:port server-info) (str ":" (:port server-info))) "")
        endpoint))
+
+(defn close-and-drain-channel
+  "Close an async channel and drain out any unconsumed values in it so the
+  runtime can reclaim the channel."
+  [channel]
+  (async/close! channel)
+  ;; Any unconsumed values would still be there in the channel.
+  ;; Once they are taken out, a closed channel will return nil and this
+  ;; while loop will exist at that time.
+  (while (async/<!! channel)))
